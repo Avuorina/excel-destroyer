@@ -1,0 +1,219 @@
+[gd_scene format=3 uid="uid://5jthpcoup4xo"]
+
+[ext_resource type="Script" path="res://Main.gd" id="1_maingd"]
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_bg"]
+bg_color = Color(0.10, 0.10, 0.17, 1)
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_topbar"]
+bg_color = Color(0.05, 0.13, 0.24, 1)
+border_width_bottom = 2
+border_color = Color(0.08, 0.45, 0.47, 1)
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_formulabar"]
+bg_color = Color(0.07, 0.17, 0.30, 1)
+border_width_bottom = 1
+border_color = Color(0.08, 0.45, 0.47, 1)
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_spreadsheet"]
+bg_color = Color(0.08, 0.13, 0.21, 1)
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_upgrade"]
+bg_color = Color(0.06, 0.12, 0.22, 1)
+border_width_top = 2
+border_color = Color(0.08, 0.45, 0.47, 1)
+
+[sub_resource type="StyleBoxFlat" id="SBFlat_prestige"]
+bg_color = Color(0.10, 0.04, 0.04, 0.97)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1.0, 0.23, 0.19, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+; ==============================
+; ルートノード: Control（フルスクリーン）
+; ==============================
+[node name="Main" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_maingd")
+
+; タイマー: UIの外・Mainの直下
+[node name="CalcTimer" type="Timer" parent="."]
+wait_time = 1.0
+autostart = false
+
+; 背景パネル
+[node name="BG" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.10, 0.10, 0.17, 1)
+
+; ==============================
+; メインUI縦積み
+; ==============================
+[node name="UI" type="VBoxContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+; --- TopBar ---
+[node name="TopBar" type="PanelContainer" parent="UI"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 72)
+theme_override_styles/panel = SubResource("SBFlat_topbar")
+
+[node name="HBox" type="HBoxContainer" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 0
+text = "ExcelDestroyer"
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.13, 0.98, 0.56, 1)
+
+[node name="Spacer" type="Control" parent="UI/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ValueDisplay" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+text = "0"
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.88, 0.88, 0.88, 1)
+horizontal_alignment = 2
+
+[node name="DPSDisplay" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(160, 0)
+text = "DPS: 0"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.13, 0.98, 0.56, 1)
+horizontal_alignment = 2
+
+; --- FormulaBar ---
+[node name="FormulaBar" type="PanelContainer" parent="UI"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 36)
+theme_override_styles/panel = SubResource("SBFlat_formulabar")
+
+[node name="HBox" type="HBoxContainer" parent="UI/FormulaBar"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CellRef" type="Label" parent="UI/FormulaBar/HBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(40, 0)
+text = "B1"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.5, 0.7, 0.9, 1)
+horizontal_alignment = 1
+
+[node name="Separator" type="Label" parent="UI/FormulaBar/HBox"]
+layout_mode = 2
+text = "|"
+theme_override_colors/font_color = Color(0.4, 0.4, 0.4, 1)
+
+[node name="FormulaText" type="Label" parent="UI/FormulaBar/HBox"]
+layout_mode = 2
+text = "=SUM(A1, A2)"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.13, 0.98, 0.56, 1)
+
+; --- Spreadsheet (GridContainer columns=3) ---
+[node name="Spreadsheet" type="PanelContainer" parent="UI"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("SBFlat_spreadsheet")
+
+[node name="Margin" type="MarginContainer" parent="UI/Spreadsheet"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="Spreadsheet" type="GridContainer" parent="UI/Spreadsheet/Margin"]
+layout_mode = 2
+columns = 3
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+
+; --- UpgradePanel ---
+[node name="UpgradePanel" type="PanelContainer" parent="UI"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+theme_override_styles/panel = SubResource("SBFlat_upgrade")
+
+[node name="Margin" type="MarginContainer" parent="UI/UpgradePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="Scroll" type="ScrollContainer" parent="UI/UpgradePanel/Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="UpgradeList" type="HBoxContainer" parent="UI/UpgradePanel/Margin/Scroll"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 8
+
+; ==============================
+; PrestigePanel: Mainの直接の子（オーバーレイ）
+; ==============================
+[node name="PrestigePanel" type="PanelContainer" parent="."]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = -120.0
+offset_right = 180.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("SBFlat_prestige")
+visible = false
+
+[node name="VBox" type="VBoxContainer" parent="PrestigePanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="NumErrorLabel" type="Label" parent="PrestigePanel/VBox"]
+layout_mode = 2
+text = "#NUM!"
+theme_override_font_sizes/font_size = 52
+theme_override_colors/font_color = Color(1, 0.23, 0.19, 1)
+horizontal_alignment = 1
+
+[node name="SubLabel" type="Label" parent="PrestigePanel/VBox"]
+layout_mode = 2
+text = "Excelが壊れた。転生して再起動する。"
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+horizontal_alignment = 1
+
+[node name="PrestigeButton" type="Button" parent="PrestigePanel/VBox"]
+layout_mode = 2
+text = "転生する  →"
+theme_override_font_sizes/font_size = 18
+
+[connection signal="pressed" from="PrestigePanel/VBox/PrestigeButton" to="." method="_on_prestige_button_pressed"]
