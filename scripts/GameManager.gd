@@ -3,11 +3,20 @@
 #   プロジェクト設定 → AutoLoad → scripts/GameManager.gd → 名前: GameManager
 extends Node
 
+# --- フェーズ定義 ---
+enum GamePhase {
+	NORMAL,      # 0〜1回転生: 普通のExcel
+	CORRUPTED,   # 2〜4回転生: 壊れかけ
+	CRITICAL,    # 5〜9回転生: 崩壊中
+	APOCALYPSE   # 10回転生〜: 完全崩壊
+}
+
 # --- シグナル ---
 signal cells_updated
 signal num_error_triggered
 signal prestige_done
 signal upgrade_applied(id: String)
+signal phase_changed(new_phase: GamePhase)
 
 # --- セルデータ ---
 var cells: Dictionary = {}         # { "A1": CellData, ... }
@@ -178,8 +187,16 @@ func _apply_upgrade_effect(id: String) -> void:
 				cells["B3"]     = b3
 				cell_order.append("B3")
 
+# --- フェーズ取得 ---
+func get_phase() -> GamePhase:
+	if prestige_count < 2:  return GamePhase.NORMAL
+	if prestige_count < 5:  return GamePhase.CORRUPTED
+	if prestige_count < 10: return GamePhase.CRITICAL
+	return GamePhase.APOCALYPSE
+
 # --- 転生 ---
 func do_prestige() -> void:
+	var prev_phase := get_phase()
 	prestige_count      += 1
 	prestige_multiplier += 0.5
 	# overflow_limitを10倍（指数+1）
@@ -194,6 +211,11 @@ func do_prestige() -> void:
 	# アップグレードリセット
 	for upg in upgrades:
 		upg["purchased"] = 0
+
+	# フェーズが変わったらシグナル発火
+	var new_phase := get_phase()
+	if new_phase != prev_phase:
+		emit_signal("phase_changed", new_phase)
 
 	emit_signal("prestige_done")
 
