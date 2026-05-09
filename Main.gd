@@ -513,11 +513,11 @@ func _on_context_menu_action_selected(action: String, extra: String) -> void:
 
 func _apply_context_formula(cell_id: String, formula_name: String) -> void:
 	var cost_map = {
-		"SUM": HugeNumber.from_float(10.0),
-		"PRODUCT": HugeNumber.from_float(200.0),
-		"POWER": HugeNumber.from_float(1000.0),
-		"FACT": HugeNumber.new(5.0, 4), # 5e4
-		"TOWER": HugeNumber.new(1.0, 6) # 1e6
+		"SUM": HugeNumber.from_float(100.0),
+		"PRODUCT": HugeNumber.from_float(2000.0),
+		"POWER": HugeNumber.new(5.0, 4), # 5e4 (50,000.0)
+		"FACT": HugeNumber.new(1.0, 6), # 1e6 (1,000,000.0)
+		"TOWER": HugeNumber.new(5.0, 7) # 5e7 (50,000,000.0)
 	}
 	var cost: HugeNumber = cost_map.get(formula_name, HugeNumber.new(0.0, 0))
 	if GameManager.coins.compare(cost) < 0:
@@ -551,7 +551,7 @@ func _apply_context_formula(cell_id: String, formula_name: String) -> void:
 			else:
 				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
 		"FACT":
-			c.inputs = ["%s%d" % [col_letter, row - 1] if row > 1 else "%s1" % prev_col_letter]
+			c.inputs = ["%s%d" % [prev_col_letter, row]]
 		"TOWER":
 			if row == 1:
 				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
