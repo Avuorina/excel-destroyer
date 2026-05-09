@@ -96,6 +96,9 @@ func _on_cells_updated() -> void:
 	value_display.text = GameManager.coins.to_display_string()
 	dps_display.text   = "DPS: " + GameManager.last_tick_gain.to_display_string()
 
+	# アップグレードボタンの有効/無効を毎tick更新
+	_update_upgrade_affordability()
+
 # --- #NUM! 発生 ---
 func _on_num_error_triggered() -> void:
 	# 全セルをエラー表示
@@ -290,6 +293,7 @@ func _make_upgrade_card(upg: Dictionary) -> Control:
 	# 購入ボタン
 	if not is_maxed:
 		var btn := Button.new()
+		btn.name = "BuyBtn"  # find_child()で検索するための名前
 		btn.text = "購入"
 		btn.add_theme_font_size_override("font_size", 11)
 		btn.disabled = not can_afford
@@ -305,6 +309,41 @@ func _make_upgrade_card(upg: Dictionary) -> Control:
 				Color(1.0, 1.0, 1.0, 1.0), 0.5)
 
 	return card
+
+# ==============================================
+# アップグレード購入ボタン 有効/無効を毎tick更新（軽量）
+# ==============================================
+func _update_upgrade_affordability() -> void:
+	for upg in GameManager.upgrades:
+		var card := upgrade_list.get_node_or_null(upg["id"])
+		if card == null:
+			continue
+
+		var is_maxed: bool = upg["purchased"] >= upg["max"]
+		if is_maxed:
+			continue
+
+		var cost: HugeNumber = GameManager.get_upgrade_cost(upg["id"])
+		var can_afford: bool = GameManager.coins.to_float() >= cost.to_float()
+
+		# ボタンのdisabled更新
+		var btn := card.find_child("BuyBtn", true, false) as Button
+		if btn == null:
+			continue
+
+		var was_disabled := btn.disabled
+		btn.disabled = not can_afford
+
+		# 買えるようになった瞬間だけ脈動アニメを開始
+		if was_disabled and can_afford:
+			var tween = btn.create_tween().set_loops()
+			tween.tween_property(btn, "modulate",
+				Color(1.2, 1.4, 1.1, 1.0), 0.5)
+			tween.tween_property(btn, "modulate",
+				Color(1.0, 1.0, 1.0, 1.0), 0.5)
+		elif not can_afford:
+			# 買えなくなったらアニメリセット
+			btn.modulate = Color(1.0, 1.0, 1.0, 1.0)
 
 # ==============================================
 # アップグレード押下
