@@ -26,8 +26,8 @@ var cell_order: Array[String] = [] # 計算順序（InputCell → FormulaCell）
 var coins: HugeNumber              # 累積獲得コイン（UIに表示・アップグレードのコスト）
 var current_max: HugeNumber        # 最後のFormulaCellの現在値
 var overflow_limit: HugeNumber     # これを超えると#NUM!
-var prev_max_float: float = 0.0    # DPS計算用
-var dps: float = 0.0               # DPS（float）
+var last_tick_gain: HugeNumber     # 1tickあたりのコイン獲得量（DPS表示用）
+var dps: float = 0.0               # 互换性用（小さい数値のうちは有効）
 
 # --- 転生 ---
 var prestige_count: int = 0
@@ -47,6 +47,7 @@ var upgrades: Array[Dictionary] = [
 func _ready() -> void:
 	coins         = HugeNumber.new(0.0, 0)
 	current_max   = HugeNumber.new(0.0, 0)
+	last_tick_gain = HugeNumber.new(0.0, 0)
 	overflow_limit = HugeNumber.from_float(1.79e308)
 	_init_cells()
 
@@ -107,11 +108,7 @@ func recalculate() -> void:
 		current_max.to_float() * prestige_multiplier
 	)
 	coins = coins.add(tick_gain)
-
-	# Step5: DPS計算（float同士）
-	var cur_float: float = current_max.to_float() * prestige_multiplier
-	dps           = cur_float - prev_max_float
-	prev_max_float = cur_float
+	last_tick_gain = tick_gain  # DPS表示用に保持
 
 	# Step6: オーバーフロー判定
 	if current_max.is_overflow(overflow_limit) and not is_num_error:
@@ -202,8 +199,8 @@ func do_prestige() -> void:
 	# overflow_limitを10倍（指数+1）
 	overflow_limit.exponent += 1
 	is_num_error = false
-	prev_max_float = 0.0
 	coins        = HugeNumber.new(0.0, 0)
+	last_tick_gain = HugeNumber.new(0.0, 0)
 
 	# セルリセット
 	_init_cells()

@@ -94,7 +94,7 @@ func _on_cells_updated() -> void:
 
 	# TopBar更新
 	value_display.text = GameManager.coins.to_display_string()
-	dps_display.text   = "DPS: %.2f" % GameManager.dps
+	dps_display.text   = "DPS: " + GameManager.last_tick_gain.to_display_string()
 
 # --- #NUM! 発生 ---
 func _on_num_error_triggered() -> void:
