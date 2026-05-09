@@ -104,9 +104,7 @@ func recalculate() -> void:
 	current_max = last_formula_value
 
 	# Step4: コイン加算（current_max × prestige_multiplier / tick）
-	var tick_gain: HugeNumber = HugeNumber.from_float(
-		current_max.to_float() * prestige_multiplier
-	)
+	var tick_gain: HugeNumber = current_max.multiply(HugeNumber.from_float(prestige_multiplier))
 	coins = coins.add(tick_gain)
 	last_tick_gain = tick_gain  # DPS表示用に保持
 
@@ -133,11 +131,11 @@ func apply_upgrade(id: String) -> bool:
 		)
 
 		# コイン不足チェック
-		if coins.to_float() < cost.to_float():
+		if not can_afford(cost):
 			return false
 
 		# コイン消費
-		coins = HugeNumber.from_float(coins.to_float() - cost.to_float())
+		coins = coins.subtract(cost)
 
 		upg["purchased"] += 1
 		_apply_upgrade_effect(id)
@@ -224,3 +222,7 @@ func get_upgrade_cost(id: String) -> HugeNumber:
 				upg["cost_base"] * pow(2.0, float(upg["purchased"]))
 			)
 	return HugeNumber.new(0.0, 0)
+
+# --- 購入可能判定（UIなどから呼ぶ用） ---
+func can_afford(cost: HugeNumber) -> bool:
+	return coins.compare(cost) >= 0

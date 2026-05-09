@@ -12,7 +12,8 @@ func _init(m: float = 0.0, e: int = 0) -> void:
 	_normalize()
 
 func _normalize() -> void:
-	if mantissa == 0.0:
+	if abs(mantissa) < 1e-15:
+		mantissa = 0.0
 		exponent = 0
 		return
 	while abs(mantissa) >= 10.0:
@@ -69,6 +70,66 @@ func power(exp_num: HugeNumber) -> HugeNumber:
 # float変換（DPS計算・コスト比較用）
 func to_float() -> float:
 	return mantissa * pow(10.0, exponent)
+
+# ゼロ判定
+func is_zero() -> bool:
+	return mantissa == 0.0
+
+# 比較: self > other なら 1、self < other なら -1、等しければ 0
+# exponent先比較で超高速化
+func compare(other: HugeNumber) -> int:
+	var self_zero := is_zero()
+	var other_zero := other.is_zero()
+	if self_zero and other_zero:
+		return 0
+	if self_zero:
+		return -1 if other.mantissa > 0.0 else 1
+	if other_zero:
+		return 1 if mantissa > 0.0 else -1
+
+	var s1 := 1 if mantissa > 0.0 else -1
+	var s2 := 1 if other.mantissa > 0.0 else -1
+	if s1 != s2:
+		return 1 if s1 > s2 else -1
+
+	if s1 > 0:
+		if exponent != other.exponent:
+			return 1 if exponent > other.exponent else -1
+		if abs(mantissa - other.mantissa) < 1e-11:
+			return 0
+		return 1 if mantissa > other.mantissa else -1
+	else:
+		if exponent != other.exponent:
+			return -1 if exponent > other.exponent else 1
+		if abs(mantissa - other.mantissa) < 1e-11:
+			return 0
+		return -1 if mantissa > other.mantissa else 1
+
+# 最小値クランプ
+func clamp_min(min_val: HugeNumber) -> HugeNumber:
+	if compare(min_val) < 0:
+		return HugeNumber.new(min_val.mantissa, min_val.exponent)
+	return HugeNumber.new(mantissa, exponent)
+
+# 減算
+func subtract(other: HugeNumber) -> HugeNumber:
+	if other.mantissa == 0.0:
+		return HugeNumber.new(mantissa, exponent)
+	if mantissa == 0.0:
+		return HugeNumber.new(-other.mantissa, other.exponent)
+
+	var diff: int = exponent - other.exponent
+
+	if diff >= 16:
+		return HugeNumber.new(mantissa, exponent)
+	if diff <= -16:
+		return HugeNumber.new(-other.mantissa, other.exponent)
+
+	var result: HugeNumber = HugeNumber.new()
+	result.mantissa = mantissa - other.mantissa * pow(10.0, -diff)
+	result.exponent = exponent
+	result._normalize()
+	return result
 
 # 表示文字列
 func to_display_string() -> String:

@@ -167,8 +167,8 @@ func _shake_all_cells() -> void:
 	for id in cell_nodes:
 		_shake_node(cell_nodes[id], 5, 0.05)
 
-func _shake_node(node: Node2D, strength: float, duration: float) -> void:
-	var origin = node.position if node is Node2D else Vector2.ZERO
+func _shake_node(node: CanvasItem, strength: float, duration: float) -> void:
+	var origin = node.position
 	var tween = create_tween().set_loops(6)
 	tween.tween_property(node, "position",
 		origin + Vector2(randf_range(-strength, strength), randf_range(-strength, strength)),
@@ -214,6 +214,7 @@ func _do_glitch_frame() -> void:
 # ==============================================
 func _rebuild_spreadsheet() -> void:
 	for child in spreadsheet.get_children():
+		spreadsheet.remove_child(child)
 		child.queue_free()
 	cell_nodes.clear()
 
@@ -230,6 +231,7 @@ func _rebuild_spreadsheet() -> void:
 # ==============================================
 func _rebuild_upgrade_buttons() -> void:
 	for child in upgrade_list.get_children():
+		upgrade_list.remove_child(child)
 		child.queue_free()
 
 	for upg in GameManager.upgrades:
@@ -239,8 +241,7 @@ func _rebuild_upgrade_buttons() -> void:
 func _make_upgrade_card(upg: Dictionary) -> Control:
 	var cost: HugeNumber = GameManager.get_upgrade_cost(upg["id"])
 	var is_maxed: bool = upg["purchased"] >= upg["max"]
-	var can_afford: bool = (not is_maxed) and \
-		(GameManager.coins.to_float() >= cost.to_float())
+	var can_afford: bool = (not is_maxed) and GameManager.can_afford(cost)
 
 	# カード用PanelContainer
 	var card := PanelContainer.new()
@@ -324,7 +325,7 @@ func _update_upgrade_affordability() -> void:
 			continue
 
 		var cost: HugeNumber = GameManager.get_upgrade_cost(upg["id"])
-		var can_afford: bool = GameManager.coins.to_float() >= cost.to_float()
+		var can_afford: bool = GameManager.can_afford(cost)
 
 		# ボタンのdisabled更新
 		var btn := card.find_child("BuyBtn", true, false) as Button
