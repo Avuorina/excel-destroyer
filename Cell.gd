@@ -3,6 +3,7 @@
 extends PanelContainer
 
 signal cell_clicked(id: String)
+signal cell_double_clicked(id: String)
 signal cell_right_clicked(id: String, mouse_pos: Vector2)
 
 @onready var cell_label: Label = $VBoxContainer/CellLabel
@@ -103,8 +104,11 @@ func reset_display() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			_play_select_animation()
-			emit_signal("cell_clicked", cell_id)
+			if event.double_click:
+				emit_signal("cell_double_clicked", cell_id)
+			else:
+				_play_select_animation()
+				emit_signal("cell_clicked", cell_id)
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			emit_signal("cell_right_clicked", cell_id, event.global_position)
 

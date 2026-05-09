@@ -245,6 +245,7 @@ func _rebuild_spreadsheet() -> void:
 			
 			# シグナル接続
 			cell_node.cell_clicked.connect(_on_cell_clicked)
+			cell_node.cell_double_clicked.connect(_on_cell_double_clicked)
 			cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
 			
 			cell_nodes[id] = cell_node
@@ -258,10 +259,20 @@ func _rebuild_upgrade_buttons() -> void:
 		child.queue_free()
 
 	for upg in GameManager.upgrades:
+		# すでに購入済みの1回限りアンロック系アップグレードカードはショップから完全に非表示にする！
+		if upg["max"] == 1 and upg["purchased"] >= 1:
+			continue
+			
 		# まだ解放されていないセルのアップグレードカードは非表示
 		if upg["id"] == "cell_value_a2" and GameManager.max_rows < 2:
 			continue
 		if upg["id"] == "cell_value_a3" and GameManager.max_rows < 3:
+			continue
+		if upg["id"] == "cell_value_a4" and GameManager.max_rows < 4:
+			continue
+		if upg["id"] == "cell_value_a5" and GameManager.max_rows < 5:
+			continue
+		if upg["id"] == "cell_value_a6" and GameManager.max_rows < 6:
 			continue
 			
 		# 段階的表示: 行を増やす（2行以上になる）まで SUM カードは非表示！
@@ -459,23 +470,30 @@ func _on_cell_right_clicked(id: String, mouse_pos: Vector2) -> void:
 	if context_menu_node:
 		var c: CellData = GameManager.cells[id]
 		var next_col_cost = GameManager.get_next_column_cost()
+		
+		var is_purchased = func(upg_id: String) -> bool:
+			for u in GameManager.upgrades:
+				if u["id"] == upg_id:
+					return u["purchased"] >= 1
+			return false
+			
 		var options = {
 			"can_delete": c.cell_type == CellData.CellType.FORMULA,
-			"can_add_column": GameManager.max_columns < 3 and GameManager.can_afford(next_col_cost),
+			"can_add_column": GameManager.max_columns < 5 and GameManager.can_afford(next_col_cost),
 			"column_cost": next_col_cost.to_display_string(),
-			"can_add_row": GameManager.can_afford(GameManager.get_next_row_cost()),
+			"can_add_row": GameManager.max_rows < 6 and GameManager.can_afford(GameManager.get_next_row_cost()),
 			"row_cost": GameManager.get_next_row_cost().to_display_string(),
-			"sum_locked": GameManager.max_columns < 2 or GameManager.upgrades[4]["purchased"] == 0,
-			"product_locked": GameManager.max_columns < 2 or GameManager.upgrades[5]["purchased"] == 0,
-			"fact_locked": GameManager.max_columns < 2 or GameManager.upgrades[6]["purchased"] == 0,
+			"sum_locked": GameManager.max_columns < 2 or not is_purchased.call("add_sum"),
+			"product_locked": GameManager.max_columns < 2 or not is_purchased.call("add_product"),
+			"fact_locked": GameManager.max_columns < 2 or not is_purchased.call("add_fact"),
 			"power_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 1,
 			"tower_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 2,
 			
 			# 段階的アンロック（前の関数を解放していないと非表示）
 			"sum_visible": GameManager.max_rows >= 2,
-			"product_visible": GameManager.upgrades[4]["purchased"] == 1,
-			"fact_visible": GameManager.upgrades[5]["purchased"] == 1,
-			"power_visible": GameManager.upgrades[6]["purchased"] == 1,
+			"product_visible": is_purchased.call("add_sum"),
+			"fact_visible": is_purchased.call("add_product"),
+			"power_visible": is_purchased.call("add_fact"),
 			"tower_visible": GameManager.prestige_count >= 1
 		}
 		context_menu_node.open_menu(id, mouse_pos, options)
@@ -565,3 +583,159 @@ func _apply_context_delete_formula(cell_id: String) -> void:
 	GameManager.recalculate()
 	_rebuild_spreadsheet()
 	_update_formula_bar()
+
+# --- セルダブルクリック詳細インスペクター ---
+var _current_detail_popup: PanelContainer = null
+
+func _on_cell_double_clicked(cell_id: String) -> void:
+	if _current_detail_popup and is_instance_valid(_current_detail_popup):
+		_current_detail_popup.queue_free()
+		
+	var c: CellData = GameManager.cells.get(cell_id)
+	if not c:
+		return
+		
+	# インスペクターのPanelContainer生成
+	var popup := PanelContainer.new()
+	_current_detail_popup = popup
+	add_child(popup)
+	
+	# スタイル設定（ガラス調・サイバーExcelグリーン）
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.01, 0.05, 0.02, 0.96)
+	sb.border_color = Color(0.13, 0.98, 0.56, 1.0)
+	sb.border_width_left = 1
+	sb.border_width_top = 1
+	sb.border_width_right = 1
+	sb.border_width_bottom = 1
+	sb.corner_radius_top_left = 6
+	sb.corner_radius_top_right = 6
+	sb.corner_radius_bottom_right = 6
+	sb.corner_radius_bottom_left = 6
+	sb.set_content_margin_all(12)
+	popup.add_theme_stylebox_override("panel", sb)
+	
+	# レイアウト構成
+	var vbox := VBoxContainer.new()
+	popup.add_child(vbox)
+	
+	# 1. ヘッダー
+	var hbox := HBoxContainer.new()
+	vbox.add_child(hbox)
+	
+	var title_lbl := Label.new()
+	title_lbl.text = "📊 セルインスペクター [%s]" % cell_id
+	title_lbl.add_theme_font_size_override("font_size", 12)
+	title_lbl.add_theme_color_override("font_color", Color(0.13, 0.98, 0.56, 1.0))
+	hbox.add_child(title_lbl)
+	
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer)
+	
+	var close_btn := Button.new()
+	close_btn.text = " ❌ "
+	close_btn.flat = true
+	close_btn.add_theme_font_size_override("font_size", 9)
+	close_btn.pressed.connect(popup.queue_free)
+	hbox.add_child(close_btn)
+	
+	var sep := HSeparator.new()
+	sep.add_theme_color_override("color", Color(0.02, 0.12, 0.05, 1.0))
+	vbox.add_child(sep)
+	
+	# 2. 基本データ
+	var is_blank = (not c.cell_type == CellData.CellType.FORMULA and not cell_id.begins_with("A"))
+	var type_str := "定数入力セル (CONSTANT)" if cell_id.begins_with("A") else "数式セル (FORMULA)"
+	if is_blank:
+		type_str = "未配置スロット (EMPTY)"
+		
+	var type_lbl := Label.new()
+	type_lbl.text = "・セルタイプ : %s" % type_str
+	type_lbl.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(type_lbl)
+	
+	var val_lbl := Label.new()
+	val_lbl.text = "・現在の表示値 : %s" % ("(空白)" if is_blank else c.display_value.to_display_string())
+	val_lbl.add_theme_font_size_override("font_size", 10)
+	vbox.add_child(val_lbl)
+	
+	# 数式内容
+	if c.cell_type == CellData.CellType.FORMULA:
+		var form_lbl := Label.new()
+		form_lbl.text = "・適用中数式 : =%s" % FormulaEngine.formula_to_string(c)
+		form_lbl.add_theme_font_size_override("font_size", 10)
+		form_lbl.add_theme_color_override("font_color", Color(0.7, 1.0, 0.8, 1.0))
+		vbox.add_child(form_lbl)
+		
+	# 3. 脳汁要素: 全体DPS貢献度
+	var contribution: float = 0.0
+	if GameManager.current_max.compare(HugeNumber.from_float(0.0)) > 0:
+		var exp_diff = c.display_value.exponent - GameManager.current_max.exponent
+		if exp_diff > 5:
+			contribution = 100.0
+		elif exp_diff < -5:
+			contribution = 0.0
+		else:
+			var base_ratio = c.display_value.mantissa / GameManager.current_max.mantissa
+			contribution = base_ratio * pow(10, exp_diff) * 100.0
+			contribution = clamp(contribution, 0.0, 100.0)
+			
+	var contrib_lbl := Label.new()
+	contrib_lbl.text = "・秒間売上貢献度 : %.2f %%" % contribution
+	contrib_lbl.add_theme_font_size_override("font_size", 10)
+	contrib_lbl.add_theme_color_override("font_color", Color(0.98, 0.92, 0.13, 1.0))
+	vbox.add_child(contrib_lbl)
+	
+	# 4. フレーバー豆知識
+	var desc := ""
+	if is_blank:
+		desc = "【未配置セル (EMPTY)】\nまだ何も配置されていない、未来の可能性のマス。右クリックから関数を挿入できる。"
+	elif cell_id.begins_with("A"):
+		desc = "【定数 (CONSTANT)】\nすべてのインフレの始祖。詳細下のボタン、または右ショップでハック強化できる。"
+	else:
+		match c.formula_type:
+			0: desc = "【SUM (合算)】\nすべてのA列を自動スキャンして合算する。安定した線形生産の要。"
+			1: desc = "【PRODUCT (乗算)】\nすべてのB列をスキャンして総乗（掛け合わせ）する。指数爆発の始まり。"
+			2: desc = "【FACT (階乗)】\n値を段階的に階乗する。浮動小数点数が熱融解し始める数学災害の引き金。"
+			3: desc = "【POWER (べき乗)】\n転生の彼方。天文学的インフレを一瞬で生み出す指数エネルギー。"
+			4: desc = "【TOWER (テトレーション)】\nパワーの塔。世界を真の数学崩壊（#NUM!）へと導く、絶対禁忌の最終兵器。"
+			
+	var desc_lbl := Label.new()
+	desc_lbl.text = "\n" + desc
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 9)
+	desc_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 0.7, 1.0))
+	vbox.add_child(desc_lbl)
+	
+	# A列なら、インスペクター内から定数ダイレクト強化アクションを追加！！！
+	if cell_id.begins_with("A"):
+		var a_idx = int(cell_id.substr(1))
+		var upg_id = "cell_value_a%d" % a_idx
+		var cost = GameManager.get_upgrade_cost(upg_id)
+		
+		var h_sep := HSeparator.new()
+		h_sep.add_theme_color_override("color", Color(0.02, 0.12, 0.05, 1.0))
+		vbox.add_child(h_sep)
+		
+		var upg_btn := Button.new()
+		upg_btn.text = "定数ハック強化 (コスト: %s)" % cost.to_display_string()
+		upg_btn.add_theme_font_size_override("font_size", 10)
+		
+		var can_afford = GameManager.can_afford(cost)
+		upg_btn.disabled = not can_afford
+		
+		upg_btn.pressed.connect(func():
+			_on_upgrade_pressed(upg_id)
+			_on_cell_double_clicked(cell_id) # ポップアップの再描画
+		)
+		vbox.add_child(upg_btn)
+
+	# 画面中央付近に配置してクリッピング
+	popup.size = Vector2(250, 190)
+	popup.global_position = get_global_mouse_position() - Vector2(125, 95)
+	
+	# 画面外はみ出し防止
+	var screen_size := get_viewport_rect().size
+	popup.global_position.x = clamp(popup.global_position.x, 20, screen_size.x - 270)
+	popup.global_position.y = clamp(popup.global_position.y, 20, screen_size.y - 210)

@@ -45,8 +45,15 @@ static func _fact(inputs: Array[String], all_cells: Dictionary) -> HugeNumber:
 	if c == null:
 		return HugeNumber.new(1.0, 0)
 	
-	var n: int = int(c.display_value.to_float())
-	n = clamp(n, 1, 100) # パフォーマンス安全のため最大100
+	var val := c.display_value
+	var n: int = 1
+	if val.exponent > 0:
+		n = 100  # 指数が1以上の超巨大数の場合は安全に最大限界の100とする
+	else:
+		# exponent が 0 以下の場合は安全に実数化
+		var float_val = val.mantissa * pow(10.0, val.exponent)
+		n = int(float_val)
+		n = clamp(n, 1, 100)
 	
 	var result := HugeNumber.new(1.0, 0)
 	for i in range(1, n + 1):

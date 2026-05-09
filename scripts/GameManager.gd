@@ -36,18 +36,21 @@ var is_num_error: bool = false
 var max_columns: int = 1 # 初期は A列 のみ (1列)
 var max_rows: int = 1    # 初期は 1行 のみ (1行)
 var column_cost_base: float = 200.0
-var row_cost_base: float = 50.0
+var row_cost_base: float = 40.0
 
 # --- アップグレード（データ駆動） ---
 # cost_base: コスト基準値（購入回数に応じて乗算）
 var upgrades: Array[Dictionary] = [
-	{ "id": "cell_value_a1", "label": "A1 値+1",      "cost_base": 10.0,   "purchased": 0, "max": 99 },
-	{ "id": "cell_value_a2", "label": "A2 値+1",      "cost_base": 100.0,  "purchased": 0, "max": 99 },
-	{ "id": "cell_value_a3", "label": "A3 値+1",      "cost_base": 500.0,  "purchased": 0, "max": 99 },
-	{ "id": "recalc_speed",  "label": "計算速度 x2",   "cost_base": 100.0,  "purchased": 0, "max": 5  },
-	{ "id": "add_sum",       "label": "SUM アンロック",     "cost_base": 10.0,   "purchased": 0, "max": 1  },
-	{ "id": "add_product",   "label": "PRODUCT アンロック", "cost_base": 200.0,  "purchased": 0, "max": 1  },
-	{ "id": "add_fact",      "label": "FACT アンロック",    "cost_base": 1000.0, "purchased": 0, "max": 1  },
+	{ "id": "cell_value_a1", "label": "A1 値+0.1",    "cost_base": 10.0,   "purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "cell_value_a2", "label": "A2 値+0.1",    "cost_base": 100.0,  "purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "cell_value_a3", "label": "A3 値+0.1",    "cost_base": 500.0,  "purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "cell_value_a4", "label": "A4 値+0.1",    "cost_base": 2000.0, "purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "cell_value_a5", "label": "A5 値+0.1",    "cost_base": 10000.0,"purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "cell_value_a6", "label": "A6 値+0.1",    "cost_base": 50000.0,"purchased": 0, "max": 99, "cost_scale": 3.5 },
+	{ "id": "recalc_speed",  "label": "計算速度 x2",   "cost_base": 100.0,  "purchased": 0, "max": 5,  "cost_scale": 6.0 },
+	{ "id": "add_sum",       "label": "SUM アンロック",     "cost_base": 10.0,   "purchased": 0, "max": 1,  "cost_scale": 1.0 },
+	{ "id": "add_product",   "label": "PRODUCT アンロック", "cost_base": 200.0,  "purchased": 0, "max": 1,  "cost_scale": 1.0 },
+	{ "id": "add_fact",      "label": "FACT アンロック",    "cost_base": 1000.0, "purchased": 0, "max": 1,  "cost_scale": 1.0 },
 ]
 
 func _ready() -> void:
@@ -99,14 +102,16 @@ func recalculate() -> void:
 		if c.cell_type == CellData.CellType.FORMULA:
 			c.display_value  = FormulaEngine.calculate(c, cells)
 
-	# Step3: current_max = すべての数式（FORMULA）セルの合計 ＋ A1セルの値
+	# Step3: current_max = すべての数式（FORMULA）セルの合計 ＋ すべての定数（A列）セルの合計
 	var total_sum: HugeNumber = HugeNumber.new(0.0, 0)
 	for id in cell_order:
 		var c: CellData = cells[id]
 		if c.cell_type == CellData.CellType.FORMULA:
 			total_sum = total_sum.add(c.display_value)
-	if cells.has("A1"):
-		total_sum = total_sum.add(cells["A1"].display_value)
+	for r in range(1, max_rows + 1):
+		var a_id = "A%d" % r
+		if cells.has(a_id):
+			total_sum = total_sum.add(cells[a_id].display_value)
 	current_max = total_sum
 
 	# Step4: コイン加算（current_max × prestige_multiplier / tick）
@@ -133,7 +138,7 @@ func apply_upgrade(id: String) -> bool:
 
 		# コスト計算（purchased回数に比例）
 		var cost: HugeNumber = HugeNumber.from_float(
-			upg["cost_base"] * pow(2.0, float(upg["purchased"]))
+			upg["cost_base"] * pow(upg.get("cost_scale", 3.5), float(upg["purchased"]))
 		)
 
 		# コイン不足チェック
@@ -155,17 +160,32 @@ func _apply_upgrade_effect(id: String) -> void:
 		"cell_value_a1":
 			if cells.has("A1"):
 				var c: CellData = cells["A1"]
-				c.raw_value = c.raw_value.add(HugeNumber.new(1.0, 0))
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
 
 		"cell_value_a2":
 			if cells.has("A2"):
 				var c: CellData = cells["A2"]
-				c.raw_value = c.raw_value.add(HugeNumber.new(1.0, 0))
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
 
 		"cell_value_a3":
 			if cells.has("A3"):
 				var c: CellData = cells["A3"]
-				c.raw_value = c.raw_value.add(HugeNumber.new(1.0, 0))
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
+
+		"cell_value_a4":
+			if cells.has("A4"):
+				var c: CellData = cells["A4"]
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
+
+		"cell_value_a5":
+			if cells.has("A5"):
+				var c: CellData = cells["A5"]
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
+
+		"cell_value_a6":
+			if cells.has("A6"):
+				var c: CellData = cells["A6"]
+				c.raw_value = c.raw_value.add(HugeNumber.new(0.1, 0))
 
 		"recalc_speed":
 			# Timerの速度変更はMain.gdで upgrade_applied シグナルを受けて行う
@@ -222,7 +242,7 @@ func get_upgrade_cost(id: String) -> HugeNumber:
 	for upg in upgrades:
 		if upg["id"] == id:
 			return HugeNumber.from_float(
-				upg["cost_base"] * pow(2.0, float(upg["purchased"]))
+				upg["cost_base"] * pow(upg.get("cost_scale", 3.5), float(upg["purchased"]))
 			)
 	return HugeNumber.new(0.0, 0)
 
@@ -232,15 +252,19 @@ func can_afford(cost: HugeNumber) -> bool:
 
 # --- 次の列追加 of コスト取得 ---
 func get_next_column_cost() -> HugeNumber:
-	if max_columns >= 3:
+	if max_columns >= 5:
 		return HugeNumber.new(0.0, 0)
 	if max_columns == 1:
 		return HugeNumber.from_float(10.0) # B列解放
-	return HugeNumber.from_float(200.0) # C列解放
+	if max_columns == 2:
+		return HugeNumber.from_float(200.0) # C列解放
+	if max_columns == 3:
+		return HugeNumber.from_float(5000.0) # D列解放
+	return HugeNumber.from_float(100000.0) # E列解放
 
 # --- 動的な新列の解放アクション ---
 func add_new_column() -> bool:
-	if max_columns >= 3:
+	if max_columns >= 5:
 		return false
 	var cost = get_next_column_cost()
 	if not can_afford(cost):
@@ -269,7 +293,7 @@ func add_new_column() -> bool:
 
 # --- 次の行（スロット）追加のコスト取得 ---
 func get_next_row_cost() -> HugeNumber:
-	return HugeNumber.from_float(row_cost_base * pow(5.0, float(max_rows - 1)))
+	return HugeNumber.from_float(row_cost_base * pow(6.5, float(max_rows - 1)))
 
 # --- 動的な行（スロット）の解放アクション ---
 func add_new_row() -> bool:
