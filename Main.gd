@@ -19,23 +19,25 @@ extends Control
 
 # Cell.tscnをプリロード
 const CELL_SCENE = preload("res://scenes/Cell.tscn")
+const CONTEXT_MENU_SCENE = preload("res://scenes/ContextMenu.tscn")
 
 # 現在表示中のCellノード { "A1": Cell, ... }
 var cell_nodes: Dictionary = {}
+var context_menu_node: Control = null
 
 # フェーズ別設定
 const PHASE_LABELS = ["[NORMAL]", "[CORRUPTED]", "[CRITICAL]", "[APOCALYPSE]"]
 const PHASE_LABEL_COLORS = [
-	Color(0.5, 0.7, 0.9, 0.7),      # NORMAL: 薄ブルー
+	Color(1.0, 1.0, 1.0, 0.9),      # NORMAL: 白
 	Color(0.98, 0.85, 0.13, 0.85),  # CORRUPTED: 黄
 	Color(0.98, 0.40, 0.13, 1.0),   # CRITICAL: オレンジ
 	Color(0.98, 0.13, 0.80, 1.0),   # APOCALYPSE: マゼンタ
 ]
 const PHASE_BG_COLORS = [
-	Color(0.08, 0.10, 0.17, 1),   # NORMAL
-	Color(0.10, 0.08, 0.04, 1),   # CORRUPTED: 茶色がかる
-	Color(0.12, 0.04, 0.08, 1),   # CRITICAL:  赤紫
-	Color(0.04, 0.01, 0.06, 1),   # APOCALYPSE: ほぼ黒
+	Color(0.01, 0.04, 0.02, 1),   # NORMAL: 極深緑
+	Color(0.10, 0.08, 0.01, 1),   # CORRUPTED: 汚染黄黒
+	Color(0.12, 0.02, 0.04, 1),   # CRITICAL: 崩壊赤黒
+	Color(0.04, 0.01, 0.06, 1),   # APOCALYPSE: 崩壊紫黒
 ]
 
 # グリッチ管理
@@ -55,6 +57,11 @@ func _ready() -> void:
 
 	# 転生パネルは初期非表示
 	prestige_panel.visible = false
+
+	# 右クリックコンテキストメニュー初期化
+	context_menu_node = CONTEXT_MENU_SCENE.instantiate()
+	add_child(context_menu_node)
+	context_menu_node.action_selected.connect(_on_context_menu_action_selected)
 
 	# 初期UI構築
 	_rebuild_spreadsheet()
@@ -94,7 +101,11 @@ func _on_cells_updated() -> void:
 
 	# TopBar更新
 	value_display.text = GameManager.coins.to_display_string()
-	dps_display.text   = "DPS: " + GameManager.last_tick_gain.to_display_string()
+	
+	# 真のDPS（1秒あたりのコイン獲得量）＝ 1tickの獲得量 × (1.0 / タイマー間隔)
+	var ticks_per_second: float = 1.0 / calc_timer.wait_time
+	var real_dps: HugeNumber = GameManager.last_tick_gain.multiply(HugeNumber.from_float(ticks_per_second))
+	dps_display.text   = "DPS: " + real_dps.to_display_string()
 
 	# アップグレードボタンの有効/無効を毎tick更新
 	_update_upgrade_affordability()
@@ -213,18 +224,30 @@ func _do_glitch_frame() -> void:
 # スプレッドシート再構築
 # ==============================================
 func _rebuild_spreadsheet() -> void:
+	spreadsheet.columns = GameManager.max_columns
 	for child in spreadsheet.get_children():
 		spreadsheet.remove_child(child)
 		child.queue_free()
 	cell_nodes.clear()
 
-	for id in GameManager.cell_order:
-		var c: CellData = GameManager.cells[id]
-		var cell_node = CELL_SCENE.instantiate()
-		spreadsheet.add_child(cell_node)
-		cell_node.setup(id, c.cell_type == CellData.CellType.FORMULA)
-		cell_node.update_value(c.display_value)
-		cell_nodes[id] = cell_node
+	for r in range(1, GameManager.max_rows + 1):
+		for col_idx in range(1, GameManager.max_columns + 1):
+			var col_letter = String.chr(64 + col_idx)
+			var id = "%s%d" % [col_letter, r]
+			if not GameManager.cells.has(id):
+				continue
+				
+			var c: CellData = GameManager.cells[id]
+			var cell_node = CELL_SCENE.instantiate()
+			spreadsheet.add_child(cell_node)
+			cell_node.setup(id, c.cell_type == CellData.CellType.FORMULA)
+			cell_node.update_value(c.display_value)
+			
+			# シグナル接続
+			cell_node.cell_clicked.connect(_on_cell_clicked)
+			cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
+			
+			cell_nodes[id] = cell_node
 
 # ==============================================
 # アップグレードボタン再構築
@@ -235,6 +258,36 @@ func _rebuild_upgrade_buttons() -> void:
 		child.queue_free()
 
 	for upg in GameManager.upgrades:
+		# まだ解放されていないセルのアップグレードカードは非表示
+		if upg["id"] == "cell_value_a2" and GameManager.max_rows < 2:
+			continue
+		if upg["id"] == "cell_value_a3" and GameManager.max_rows < 3:
+			continue
+			
+		# 段階的表示: 行を増やす（2行以上になる）まで SUM カードは非表示！
+		if upg["id"] == "add_sum" and GameManager.max_rows < 2:
+			continue
+			
+		# SUM を購入するまで PRODUCT カードは非表示！
+		if upg["id"] == "add_product":
+			var sum_purchased := false
+			for u in GameManager.upgrades:
+				if u["id"] == "add_sum" and u["purchased"] == 1:
+					sum_purchased = true
+					break
+			if not sum_purchased:
+				continue
+
+		# PRODUCT を購入するまで FACT カードは非表示！
+		if upg["id"] == "add_fact":
+			var product_purchased := false
+			for u in GameManager.upgrades:
+				if u["id"] == "add_product" and u["purchased"] == 1:
+					product_purchased = true
+					break
+			if not product_purchased:
+				continue
+				
 		var card := _make_upgrade_card(upg)
 		upgrade_list.add_child(card)
 
@@ -378,3 +431,137 @@ func _update_formula_bar() -> void:
 	var lc: CellData = GameManager.cells[last_formula_id]
 	cell_ref_label.text = last_formula_id
 	formula_text.text   = FormulaEngine.formula_to_string(lc)
+
+# ==============================================
+# 入力・イベント制御 (メニュー領域外クリックキャンセルなど)
+# ==============================================
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and not event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if context_menu_node and context_menu_node.visible:
+				if not context_menu_node.get_global_rect().has_point(event.global_position):
+					context_menu_node.visible = false
+
+# --- 左クリック選択時の数式バー更新 ---
+func _on_cell_clicked(id: String) -> void:
+	if context_menu_node:
+		context_menu_node.visible = false # 左クリック時はポップアップを閉じる
+
+	var c: CellData = GameManager.cells[id]
+	cell_ref_label.text = id
+	if c.cell_type == CellData.CellType.FORMULA:
+		formula_text.text = FormulaEngine.formula_to_string(c)
+	else:
+		formula_text.text = c.raw_value.to_display_string()
+
+# --- 右クリック時のメニュー呼び出し ---
+func _on_cell_right_clicked(id: String, mouse_pos: Vector2) -> void:
+	if context_menu_node:
+		var c: CellData = GameManager.cells[id]
+		var next_col_cost = GameManager.get_next_column_cost()
+		var options = {
+			"can_delete": c.cell_type == CellData.CellType.FORMULA,
+			"can_add_column": GameManager.max_columns < 3 and GameManager.can_afford(next_col_cost),
+			"column_cost": next_col_cost.to_display_string(),
+			"can_add_row": GameManager.can_afford(GameManager.get_next_row_cost()),
+			"row_cost": GameManager.get_next_row_cost().to_display_string(),
+			"sum_locked": GameManager.max_columns < 2 or GameManager.upgrades[4]["purchased"] == 0,
+			"product_locked": GameManager.max_columns < 2 or GameManager.upgrades[5]["purchased"] == 0,
+			"fact_locked": GameManager.max_columns < 2 or GameManager.upgrades[6]["purchased"] == 0,
+			"power_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 1,
+			"tower_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 2,
+			
+			# 段階的アンロック（前の関数を解放していないと非表示）
+			"sum_visible": GameManager.max_rows >= 2,
+			"product_visible": GameManager.upgrades[4]["purchased"] == 1,
+			"fact_visible": GameManager.upgrades[5]["purchased"] == 1,
+			"power_visible": GameManager.upgrades[6]["purchased"] == 1,
+			"tower_visible": GameManager.prestige_count >= 1
+		}
+		context_menu_node.open_menu(id, mouse_pos, options)
+
+# --- コンテキストメニューでの選択アクション実行 ---
+func _on_context_menu_action_selected(action: String, extra: String) -> void:
+	var target_cell_id = context_menu_node.current_cell_id
+	match action:
+		"insert_function":
+			_apply_context_formula(target_cell_id, extra)
+		"insert_column":
+			_apply_context_insert_column()
+		"insert_row":
+			_apply_context_insert_row()
+		"delete_formula":
+			_apply_context_delete_formula(target_cell_id)
+
+func _apply_context_formula(cell_id: String, formula_name: String) -> void:
+	var cost_map = {
+		"SUM": HugeNumber.from_float(10.0),
+		"PRODUCT": HugeNumber.from_float(200.0),
+		"POWER": HugeNumber.from_float(1000.0),
+		"FACT": HugeNumber.new(5.0, 4), # 5e4
+		"TOWER": HugeNumber.new(1.0, 6) # 1e6
+	}
+	var cost: HugeNumber = cost_map.get(formula_name, HugeNumber.new(0.0, 0))
+	if GameManager.coins.compare(cost) < 0:
+		return
+	
+	GameManager.coins = GameManager.coins.subtract(cost)
+
+	var c: CellData = GameManager.cells[cell_id]
+	c.cell_type = CellData.CellType.FORMULA
+	
+	var col_letter = cell_id.substr(0, 1)
+	var row = int(cell_id.substr(1))
+	var prev_col_letter = String.chr(col_letter.unicode_at(0) - 1)
+	
+	c.formula_type = CellData.FormulaType.get(formula_name)
+	
+	match formula_name:
+		"SUM":
+			if row == 1:
+				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
+			else:
+				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
+		"PRODUCT":
+			if row == 1:
+				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
+			else:
+				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
+		"POWER":
+			if row == 1:
+				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
+			else:
+				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
+		"FACT":
+			c.inputs = ["%s%d" % [col_letter, row - 1] if row > 1 else "%s1" % prev_col_letter]
+		"TOWER":
+			if row == 1:
+				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
+			else:
+				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
+			
+	GameManager.recalculate()
+	_rebuild_spreadsheet()
+	_update_formula_bar()
+
+func _apply_context_insert_column() -> void:
+	var success = GameManager.add_new_column()
+	if success:
+		_rebuild_spreadsheet()
+		_rebuild_upgrade_buttons()
+		_update_formula_bar()
+
+func _apply_context_insert_row() -> void:
+	var success = GameManager.add_new_row()
+	if success:
+		_rebuild_spreadsheet()
+		_rebuild_upgrade_buttons()
+		_update_formula_bar()
+
+func _apply_context_delete_formula(cell_id: String) -> void:
+	var c: CellData = GameManager.cells[cell_id]
+	c.cell_type = CellData.CellType.INPUT
+	c.raw_value = HugeNumber.new(1.0, 0)
+	GameManager.recalculate()
+	_rebuild_spreadsheet()
+	_update_formula_bar()

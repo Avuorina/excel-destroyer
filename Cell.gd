@@ -2,34 +2,37 @@
 # Cell.tscnにアタッチするスクリプト。セル1つ分のUIを制御する。
 extends PanelContainer
 
-@onready var cell_label:  Label = $VBoxContainer/CellLabel
+signal cell_clicked(id: String)
+signal cell_right_clicked(id: String, mouse_pos: Vector2)
+
+@onready var cell_label: Label = $VBoxContainer/CellLabel
 @onready var value_label: Label = $VBoxContainer/ValueLabel
 
 var cell_id: String = ""
 var is_formula: bool = false
-var _current_style: StyleBoxFlat = null  # border操作用に保持
+var _current_style: StyleBoxFlat = null # border操作用に保持
 
 # --- 定数: カラー ---
-const COLOR_NORMAL_BG    := Color(0.06, 0.20, 0.38, 1.0)
-const COLOR_FORMULA_BG   := Color(0.05, 0.15, 0.28, 1.0)
-const COLOR_TEXT_NORMAL  := Color(0.88, 0.88, 0.88, 1.0)
-const COLOR_TEXT_FORMULA := Color(0.13, 0.98, 0.56, 1.0)  # #21fa90 緑
-const COLOR_ERROR        := Color(1.00, 0.23, 0.19, 1.0)  # #ff3b30 赤
-const COLOR_SELECTED_BORDER := Color(0.0, 0.85, 0.85, 1.0) # シアン選択枠
-const COLOR_BORDER_IDLE  := Color(0.086, 0.129, 0.243, 1.0)
+const COLOR_NORMAL_BG := Color(0.01, 0.04, 0.02, 1.0) # 極深緑（入力セル）
+const COLOR_FORMULA_BG := Color(0.02, 0.06, 0.03, 1.0) # 少し明るい深緑（数式セル）
+const COLOR_TEXT_NORMAL := Color(1.0, 1.0, 1.0, 1.0) # 白（通常文字）
+const COLOR_TEXT_FORMULA := Color(0.9, 1.0, 0.95, 1.0) # 明るいミント白（数式文字）
+const COLOR_ERROR := Color(1.00, 0.23, 0.19, 1.0) # 赤
+const COLOR_SELECTED_BORDER := Color(0.13, 0.98, 0.56, 1.0) # 眩しいExcelグリーン枠
+const COLOR_BORDER_IDLE := Color(0.02, 0.12, 0.05, 1.0) # 深緑グリッド線
 
 # 桁数→色のステップ（exponentベース）
 const MAGNITUDE_COLORS: Array = [
-	[0,   Color(0.13, 0.98, 0.56, 1.0)],  # 緑  (normal)
-	[6,   Color(0.98, 0.92, 0.13, 1.0)],  # 黄  (heating up)
-	[12,  Color(0.98, 0.58, 0.13, 1.0)],  # オレンジ (hot)
-	[24,  Color(0.98, 0.20, 0.13, 1.0)],  # 赤  (critical)
-	[48,  Color(0.90, 0.10, 0.95, 1.0)],  # マゼンタ (APOCALYPSE)
+	[0, Color(1.0, 1.0, 1.0, 1.0)], # 白 (normal)
+	[6, Color(0.98, 0.92, 0.13, 1.0)], # 黄 (heating up)
+	[12, Color(0.98, 0.58, 0.13, 1.0)], # オレンジ (hot)
+	[24, Color(0.98, 0.20, 0.13, 1.0)], # 赤 (critical)
+	[48, Color(0.90, 0.10, 0.95, 1.0)], # マゼンタ (APOCALYPSE)
 ]
 
 # セルのIDとタイプを設定する
 func setup(id: String, formula: bool) -> void:
-	cell_id    = id
+	cell_id = id
 	is_formula = formula
 	cell_label.text = id
 
@@ -50,7 +53,11 @@ func setup(id: String, formula: bool) -> void:
 
 # 値を更新する（フラッシュ演出つき）
 func update_value(value: HugeNumber) -> void:
-	value_label.text = value.to_display_string()
+	# A列以外かつ数式セル（is_formula）ではない（＝空白セル）の場合は、完全に空白にする！
+	if not is_formula and not cell_id.begins_with("A"):
+		value_label.text = ""
+	else:
+		value_label.text = value.to_display_string()
 
 	# --- 桁数に応じた文字色 ---
 	var target_color: Color
@@ -63,7 +70,7 @@ func update_value(value: HugeNumber) -> void:
 	var tween = create_tween()
 	tween.tween_property(
 		value_label, "modulate",
-		Color(1.8, 1.8, 1.8, 1.0), 0.04  # ホワイトフラッシュ
+		Color(1.8, 1.8, 1.8, 1.0), 0.04 # ホワイトフラッシュ
 	)
 	tween.tween_property(
 		value_label, "modulate",
@@ -92,11 +99,14 @@ func reset_display() -> void:
 		_current_style.bg_color = \
 			COLOR_FORMULA_BG if is_formula else COLOR_NORMAL_BG
 
-# --- セル選択演出 ---
+# --- セル選択演出 ＆ クリック検知 ---
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
 			_play_select_animation()
+			emit_signal("cell_clicked", cell_id)
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			emit_signal("cell_right_clicked", cell_id, event.global_position)
 
 func _play_select_animation() -> void:
 	if not _current_style:
@@ -108,22 +118,22 @@ func _play_select_animation() -> void:
 	# border色変化
 	tween.tween_property(_current_style, "border_color",
 		COLOR_SELECTED_BORDER, 0.06)
-	tween.tween_property(_current_style, "border_width_left",   2, 0.06)
-	tween.tween_property(_current_style, "border_width_top",    2, 0.06)
-	tween.tween_property(_current_style, "border_width_right",  2, 0.06)
+	tween.tween_property(_current_style, "border_width_left", 2, 0.06)
+	tween.tween_property(_current_style, "border_width_top", 2, 0.06)
+	tween.tween_property(_current_style, "border_width_right", 2, 0.06)
 	tween.tween_property(_current_style, "border_width_bottom", 2, 0.06)
 
 	# スケールポップ
-	tween.tween_property(self, "scale", Vector2(1.06, 1.06), 0.07)
+	tween.tween_property(self , "scale", Vector2(1.06, 1.06), 0.07)
 
 	# 戻す
 	tween.chain().set_parallel(true)
-	tween.tween_property(self, "scale", Vector2(1.0, 1.0), 0.10)
+	tween.tween_property(self , "scale", Vector2(1.0, 1.0), 0.10)
 	tween.tween_property(_current_style, "border_color",
 		COLOR_BORDER_IDLE, 0.25)
-	tween.tween_property(_current_style, "border_width_left",   1, 0.25)
-	tween.tween_property(_current_style, "border_width_top",    1, 0.25)
-	tween.tween_property(_current_style, "border_width_right",  1, 0.25)
+	tween.tween_property(_current_style, "border_width_left", 1, 0.25)
+	tween.tween_property(_current_style, "border_width_top", 1, 0.25)
+	tween.tween_property(_current_style, "border_width_right", 1, 0.25)
 	tween.tween_property(_current_style, "border_width_bottom", 1, 0.25)
 
 # --- 桁数→色マッピング ---

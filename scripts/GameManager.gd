@@ -29,19 +29,25 @@ var overflow_limit: HugeNumber     # これを超えると#NUM!
 var last_tick_gain: HugeNumber     # 1tickあたりのコイン獲得量（DPS表示用）
 var dps: float = 0.0               # 互换性用（小さい数値のうちは有効）
 
-# --- 転生 ---
+# --- 転生 ＆ シート解放 ---
 var prestige_count: int = 0
 var prestige_multiplier: float = 1.0
 var is_num_error: bool = false
+var max_columns: int = 1 # 初期は A列 のみ (1列)
+var max_rows: int = 1    # 初期は 1行 のみ (1行)
+var column_cost_base: float = 200.0
+var row_cost_base: float = 50.0
 
 # --- アップグレード（データ駆動） ---
 # cost_base: コスト基準値（購入回数に応じて乗算）
 var upgrades: Array[Dictionary] = [
 	{ "id": "cell_value_a1", "label": "A1 値+1",      "cost_base": 10.0,   "purchased": 0, "max": 99 },
-	{ "id": "cell_value_a2", "label": "A2 値+1",      "cost_base": 10.0,   "purchased": 0, "max": 99 },
+	{ "id": "cell_value_a2", "label": "A2 値+1",      "cost_base": 100.0,  "purchased": 0, "max": 99 },
+	{ "id": "cell_value_a3", "label": "A3 値+1",      "cost_base": 500.0,  "purchased": 0, "max": 99 },
 	{ "id": "recalc_speed",  "label": "計算速度 x2",   "cost_base": 100.0,  "purchased": 0, "max": 5  },
+	{ "id": "add_sum",       "label": "SUM アンロック",     "cost_base": 10.0,   "purchased": 0, "max": 1  },
 	{ "id": "add_product",   "label": "PRODUCT アンロック", "cost_base": 200.0,  "purchased": 0, "max": 1  },
-	{ "id": "add_power",     "label": "POWER アンロック",   "cost_base": 1000.0, "purchased": 0, "max": 1  },
+	{ "id": "add_fact",      "label": "FACT アンロック",    "cost_base": 1000.0, "purchased": 0, "max": 1  },
 ]
 
 func _ready() -> void:
@@ -56,30 +62,25 @@ func _init_cells() -> void:
 	cells.clear()
 	cell_order.clear()
 
-	# InputCell A1
-	var a1: CellData = CellData.new()
-	a1.cell_id   = "A1"
-	a1.cell_type = CellData.CellType.INPUT
-	a1.raw_value = HugeNumber.new(1.0, 0)
-	cells["A1"]  = a1
-	cell_order.append("A1")
-
-	# InputCell A2
-	var a2: CellData = CellData.new()
-	a2.cell_id   = "A2"
-	a2.cell_type = CellData.CellType.INPUT
-	a2.raw_value = HugeNumber.new(1.0, 0)
-	cells["A2"]  = a2
-	cell_order.append("A2")
-
-	# FormulaCell B1 = SUM(A1, A2)
-	var b1: CellData = CellData.new()
-	b1.cell_id      = "B1"
-	b1.cell_type    = CellData.CellType.FORMULA
-	b1.formula_type = CellData.FormulaType.SUM
-	b1.inputs       = ["A1", "A2"]
-	cells["B1"]     = b1
-	cell_order.append("B1")
+	# max_rows, max_columns に応じてグリッドを構築
+	for row in range(1, max_rows + 1):
+		for col_idx in range(1, max_columns + 1):
+			var col_letter = String.chr(64 + col_idx)
+			var id = "%s%d" % [col_letter, row]
+			var cell := CellData.new()
+			cell.cell_id = id
+			
+			if col_idx == 1:
+				# A列はすべて「無関数（定数）」列
+				cell.cell_type = CellData.CellType.INPUT
+				cell.raw_value = HugeNumber.new(1.0, 0)
+			elif col_idx >= 2:
+				# B列・C列以降は初期状態はすべて「空白（無関数）」セル
+				cell.cell_type = CellData.CellType.INPUT
+				cell.raw_value = HugeNumber.new(0.0, 0)
+			
+			cells[id] = cell
+			cell_order.append(id)
 
 # --- 再計算（Timerのtimeoutで呼ばれる） ---
 func recalculate() -> void:
@@ -93,15 +94,20 @@ func recalculate() -> void:
 			c.display_value = c.raw_value
 
 	# Step2: FormulaCell → FormulaEngineで計算（順番に）
-	var last_formula_value: HugeNumber = HugeNumber.new(0.0, 0)
 	for id in cell_order:
 		var c: CellData = cells[id]
 		if c.cell_type == CellData.CellType.FORMULA:
 			c.display_value  = FormulaEngine.calculate(c, cells)
-			last_formula_value = c.display_value
 
-	# Step3: current_max = 最後のFormulaCellの値
-	current_max = last_formula_value
+	# Step3: current_max = すべての数式（FORMULA）セルの合計 ＋ A1セルの値
+	var total_sum: HugeNumber = HugeNumber.new(0.0, 0)
+	for id in cell_order:
+		var c: CellData = cells[id]
+		if c.cell_type == CellData.CellType.FORMULA:
+			total_sum = total_sum.add(c.display_value)
+	if cells.has("A1"):
+		total_sum = total_sum.add(cells["A1"].display_value)
+	current_max = total_sum
 
 	# Step4: コイン加算（current_max × prestige_multiplier / tick）
 	var tick_gain: HugeNumber = current_max.multiply(HugeNumber.from_float(prestige_multiplier))
@@ -156,31 +162,26 @@ func _apply_upgrade_effect(id: String) -> void:
 				var c: CellData = cells["A2"]
 				c.raw_value = c.raw_value.add(HugeNumber.new(1.0, 0))
 
+		"cell_value_a3":
+			if cells.has("A3"):
+				var c: CellData = cells["A3"]
+				c.raw_value = c.raw_value.add(HugeNumber.new(1.0, 0))
+
 		"recalc_speed":
 			# Timerの速度変更はMain.gdで upgrade_applied シグナルを受けて行う
 			pass
 
-		"add_product":
-			# B2 = PRODUCT(B1, A1) を追加
-			if not cells.has("B2"):
-				var b2: CellData = CellData.new()
-				b2.cell_id      = "B2"
-				b2.cell_type    = CellData.CellType.FORMULA
-				b2.formula_type = CellData.FormulaType.PRODUCT
-				b2.inputs       = ["B1", "A1"]
-				cells["B2"]     = b2
-				cell_order.append("B2")
+		"add_sum":
+			# 右クリックでのアンロック条件フラグ。購入効果は pass
+			pass
 
-		"add_power":
-			# B3 = POWER(B2, A2) を追加（B2がある場合のみ）
-			if not cells.has("B3") and cells.has("B2"):
-				var b3: CellData = CellData.new()
-				b3.cell_id      = "B3"
-				b3.cell_type    = CellData.CellType.FORMULA
-				b3.formula_type = CellData.FormulaType.POWER
-				b3.inputs       = ["B2", "A2"]
-				cells["B3"]     = b3
-				cell_order.append("B3")
+		"add_product":
+			# 右クリックでのアンロック条件フラグ。購入効果は pass
+			pass
+
+		"add_fact":
+			# 右クリックでのアンロック条件フラグ。購入効果は pass
+			pass
 
 # --- フェーズ取得 ---
 func get_phase() -> GamePhase:
@@ -199,6 +200,8 @@ func do_prestige() -> void:
 	is_num_error = false
 	coins        = HugeNumber.new(0.0, 0)
 	last_tick_gain = HugeNumber.new(0.0, 0)
+	max_columns  = 1 # 転生時に列数を1列に初期化
+	max_rows     = 1 # 転生時に行数を1行に初期化
 
 	# セルリセット
 	_init_cells()
@@ -226,3 +229,99 @@ func get_upgrade_cost(id: String) -> HugeNumber:
 # --- 購入可能判定（UIなどから呼ぶ用） ---
 func can_afford(cost: HugeNumber) -> bool:
 	return coins.compare(cost) >= 0
+
+# --- 次の列追加 of コスト取得 ---
+func get_next_column_cost() -> HugeNumber:
+	if max_columns >= 3:
+		return HugeNumber.new(0.0, 0)
+	if max_columns == 1:
+		return HugeNumber.from_float(10.0) # B列解放
+	return HugeNumber.from_float(200.0) # C列解放
+
+# --- 動的な新列の解放アクション ---
+func add_new_column() -> bool:
+	if max_columns >= 3:
+		return false
+	var cost = get_next_column_cost()
+	if not can_afford(cost):
+		return false
+	
+	coins = coins.subtract(cost)
+	max_columns += 1
+	
+	# 新列構築
+	var col_letter = String.chr(64 + max_columns)
+	for row in range(1, max_rows + 1):
+		var id = "%s%d" % [col_letter, row]
+		var cell := CellData.new()
+		cell.cell_id = id
+		
+		# 最初はすべて「空白（無関数）」セルとして生成！
+		cell.cell_type = CellData.CellType.INPUT
+		cell.raw_value = HugeNumber.new(0.0, 0)
+				
+		cells[id] = cell
+		cell_order.append(id)
+		
+	recalculate()
+	emit_signal("cells_updated")
+	return true
+
+# --- 次の行（スロット）追加のコスト取得 ---
+func get_next_row_cost() -> HugeNumber:
+	return HugeNumber.from_float(row_cost_base * pow(5.0, float(max_rows - 1)))
+
+# --- 動的な行（スロット）の解放アクション ---
+func add_new_row() -> bool:
+	var cost = get_next_row_cost()
+	if not can_afford(cost):
+		return false
+	
+	coins = coins.subtract(cost)
+	max_rows += 1
+	
+	# 全列に新しい行を生成
+	for col_idx in range(1, max_columns + 1):
+		var col_letter = String.chr(64 + col_idx)
+		var id = "%s%d" % [col_letter, max_rows]
+		var cell := CellData.new()
+		cell.cell_id = id
+		
+		if col_idx == 1:
+			cell.cell_type = CellData.CellType.INPUT
+			cell.raw_value = HugeNumber.new(1.0, 0)
+		elif col_idx >= 2:
+			# B列・C列以降は初期状態はすべて「空白（無関数）」セル
+			cell.cell_type = CellData.CellType.INPUT
+			cell.raw_value = HugeNumber.new(0.0, 0)
+			
+		cells[id] = cell
+		cell_order.append(id)
+
+	# 動的インプット・シンクロナイザー（A列全体、B列全体をスキャン）
+	var all_a_cells: Array[String] = []
+	for r in range(1, max_rows + 1):
+		all_a_cells.append("A%d" % r)
+		
+	var all_b_cells: Array[String] = []
+	for r in range(1, max_rows + 1):
+		all_b_cells.append("B%d" % r)
+		
+	# B列（SUM）かつ実際にFORMULAになっているセルの inputs を A列全体 に同期
+	for b_id in all_b_cells:
+		if cells.has(b_id):
+			var b_cell: CellData = cells[b_id]
+			if b_cell.cell_type == CellData.CellType.FORMULA:
+				b_cell.inputs = all_a_cells.duplicate()
+			
+	# C列（PRODUCT）かつ実際にFORMULAになっているセルの inputs を B列全体 に同期
+	for r in range(1, max_rows + 1):
+		var c_id = "C%d" % r
+		if cells.has(c_id):
+			var c_cell: CellData = cells[c_id]
+			if c_cell.cell_type == CellData.CellType.FORMULA:
+				c_cell.inputs = all_b_cells.duplicate()
+		
+	recalculate()
+	emit_signal("cells_updated")
+	return true
