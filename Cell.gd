@@ -52,6 +52,28 @@ func setup(id: String, formula: bool) -> void:
 	# クリック検知のためにマウス入力を有効化
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
+# 空の装飾用セルを設定する
+func setup_empty() -> void:
+	cell_id    = ""
+	is_formula = false
+	cell_label.text = ""
+	value_label.text = ""
+	
+	# StyleBoxFlatを複製して見た目を薄くする
+	var original = get_theme_stylebox("panel") as StyleBoxFlat
+	if original:
+		_current_style = original.duplicate() as StyleBoxFlat
+		add_theme_stylebox_override("panel", _current_style)
+		_current_style.bg_color = Color(0.06, 0.20, 0.38, 0.15) # 非常に透明な背景
+		_current_style.border_color = Color(0.086, 0.129, 0.243, 0.3) # 薄いボーダー
+		_current_style.border_width_left = 1
+		_current_style.border_width_top = 1
+		_current_style.border_width_right = 1
+		_current_style.border_width_bottom = 1
+	
+	# 入力・フォーカスを一切無視
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 # 値を更新する（フラッシュ演出つき）
 func update_value(value: HugeNumber) -> void:
 	# A列以外かつ数式セル（is_formula）ではない（＝空白セル）の場合は、完全に空白にする！

@@ -25,6 +25,11 @@ const CONTEXT_MENU_SCENE = preload("res://scenes/ContextMenu.tscn")
 var cell_nodes: Dictionary = {}
 var context_menu_node: Control = null
 
+# 動的グリッド用キャッシュ
+var _last_cols: int = 0
+var _last_rows: int = 0
+var _last_cell_count: int = 0
+
 # フェーズ別設定
 const PHASE_LABELS = ["[NORMAL]", "[CORRUPTED]", "[CRITICAL]", "[APOCALYPSE]"]
 const PHASE_LABEL_COLORS = [
@@ -68,6 +73,11 @@ func _ready() -> void:
 	_rebuild_upgrade_buttons()
 	_update_formula_bar()
 	_update_phase_ui(GameManager.get_phase())
+
+	# スプレッドシートの親コンテナのリサイズを監視し、グリッドを動的に埋め尽くす
+	var parent_container = spreadsheet.get_parent().get_parent() as Control
+	if parent_container:
+		parent_container.resized.connect(_on_spreadsheet_resized)
 
 	# タイマー開始
 	calc_timer.start()
@@ -224,31 +234,92 @@ func _do_glitch_frame() -> void:
 # スプレッドシート再構築
 # ==============================================
 func _rebuild_spreadsheet() -> void:
-	spreadsheet.columns = GameManager.max_columns
+	# 強制的に再構築を走らせるため、キャッシュのセル数を無効値にする
+	_last_cell_count = -1
+	_adjust_grid_dimensions()
+
+# ==============================================
+# 画面サイズに合わせてグリッドの列数・行数・ダミーセルを動的に調整（高速）
+# ==============================================
+func _adjust_grid_dimensions() -> void:
+	var parent_container = spreadsheet.get_parent().get_parent() as Control
+	if not parent_container:
+		return
+		
+	var viewport_size = get_viewport_rect().size
+	
+	# 親コンテナのサイズを直接使うと、セルの増減で親のサイズが変わり、
+	# さらなる再計算（無限ループ）を引き起こすため、ビューポートの絶対サイズを基準にする。
+	# サイドバー幅(220px) + マージン(16px) = 236px
+	var available_width = viewport_size.x - 236
+	# トップバー高(64px) + 数式バー高(34px) + マージン(16px) = 114px
+	var available_height = viewport_size.y - 114
+	
+	# セルサイズ(110x60) + 間隔(4px) = 横114px / 縦64px
+	# ゲーム本編の解放列数・行数を下回らないように、画面幅を完璧に満たす列数・行数を計算
+	var cols = max(GameManager.max_columns, int(floor(available_width / 114.0)))
+	var rows = max(GameManager.max_rows, int(ceil(available_height / 64.0)))
+	
+	var active_count = GameManager.cells.size()
+	
+	# キャッシュ比較: 列数・行数・実セル数がいずれも変わっていなければ何もしない（超高速化）
+	if cols == _last_cols and rows == _last_rows and active_count == _last_cell_count:
+		return
+		
+	_last_cols = cols
+	_last_rows = rows
+	_last_cell_count = active_count
+	
+	# GridContainerの列数を動的に更新（画面幅分をタイル状に並べるためcolsを使う）
+	spreadsheet.columns = cols
+	
+	# 既存セルを一度完全にクリーンアップ（remove_childしてからqueue_freeする安全策）
 	for child in spreadsheet.get_children():
 		spreadsheet.remove_child(child)
 		child.queue_free()
 	cell_nodes.clear()
-
-	for r in range(1, GameManager.max_rows + 1):
-		for col_idx in range(1, GameManager.max_columns + 1):
-			var col_letter = String.chr(64 + col_idx)
-			var id = "%s%d" % [col_letter, r]
-			if not GameManager.cells.has(id):
-				continue
+	
+	# グリッド（2次元）を走査して1列ずつ埋めていく
+	for r in range(rows):
+		for c in range(cols):
+			# 解放済みの本編ゲーム領域内（行・列ともにmax範囲内）かどうか判定
+			var is_active_area = r < GameManager.max_rows and c < GameManager.max_columns
+			if is_active_area:
+				var col_letter = String.chr(65 + c) # 65は 'A'
+				var cell_id = "%s%d" % [col_letter, r + 1]
 				
-			var c: CellData = GameManager.cells[id]
-			var cell_node = CELL_SCENE.instantiate()
-			spreadsheet.add_child(cell_node)
-			cell_node.setup(id, c.cell_type == CellData.CellType.FORMULA)
-			cell_node.update_value(c.display_value)
-			
-			# シグナル接続
-			cell_node.cell_clicked.connect(_on_cell_clicked)
-			cell_node.cell_double_clicked.connect(_on_cell_double_clicked)
-			cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
-			
-			cell_nodes[id] = cell_node
+				if GameManager.cells.has(cell_id):
+					var cell_data = GameManager.cells[cell_id]
+					var cell_node = CELL_SCENE.instantiate()
+					spreadsheet.add_child(cell_node)
+					
+					# セルサイズ拡張は行わず、オリジナルの110x60を維持
+					cell_node.setup(cell_id, cell_data.cell_type == CellData.CellType.FORMULA)
+					
+					if GameManager.is_num_error:
+						cell_node.show_error()
+					else:
+						cell_node.update_value(cell_data.display_value)
+						
+					# リモート新機能: インスペクターや右クリックコンテキストのシグナル接続
+					cell_node.cell_clicked.connect(_on_cell_clicked)
+					cell_node.cell_double_clicked.connect(_on_cell_double_clicked)
+					cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
+					
+					cell_nodes[cell_id] = cell_node
+					continue # 配置完了
+					
+			# 解放されていない枠、または画面の余白部分はすべてダミーセルで埋め尽くす
+			var dummy_node = CELL_SCENE.instantiate()
+			spreadsheet.add_child(dummy_node)
+			dummy_node.setup_empty()
+
+# ==============================================
+# コンテナリサイズ時のイベント
+# ==============================================
+func _on_spreadsheet_resized() -> void:
+	# リサイズ時は境界線をまたいだ時だけ再計算処理を叩く
+	_adjust_grid_dimensions()
 
 # ==============================================
 # アップグレードボタン再構築
