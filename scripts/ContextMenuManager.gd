@@ -16,15 +16,24 @@ func _ready() -> void:
 	# ボタンの共通Styleをコードから生成
 	btn_style_normal = StyleBoxFlat.new()
 	btn_style_normal.bg_color = Color(0.01, 0.04, 0.02, 1.0)
-	btn_style_normal.set_content_margin_all(6)
+	btn_style_normal.content_margin_left = 6
+	btn_style_normal.content_margin_top = 6
+	btn_style_normal.content_margin_right = 6
+	btn_style_normal.content_margin_bottom = 6
 
 	btn_style_hover = StyleBoxFlat.new()
 	btn_style_hover.bg_color = Color(0.06, 0.45, 0.22, 1.0) # ホバー時はきれいな緑
-	btn_style_hover.set_content_margin_all(6)
+	btn_style_hover.content_margin_left = 6
+	btn_style_hover.content_margin_top = 6
+	btn_style_hover.content_margin_right = 6
+	btn_style_hover.content_margin_bottom = 6
 
 	btn_style_disabled = StyleBoxFlat.new()
 	btn_style_disabled.bg_color = Color(0.01, 0.04, 0.02, 0.5)
-	btn_style_disabled.set_content_margin_all(6)
+	btn_style_disabled.content_margin_left = 6
+	btn_style_disabled.content_margin_top = 6
+	btn_style_disabled.content_margin_right = 6
+	btn_style_disabled.content_margin_bottom = 6
 
 	# 初期状態は非表示
 	visible = false

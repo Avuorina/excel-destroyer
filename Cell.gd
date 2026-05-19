@@ -64,8 +64,8 @@ func setup_empty() -> void:
 	if original:
 		_current_style = original.duplicate() as StyleBoxFlat
 		add_theme_stylebox_override("panel", _current_style)
-		_current_style.bg_color = Color(0.06, 0.20, 0.38, 0.15) # 非常に透明な背景
-		_current_style.border_color = Color(0.086, 0.129, 0.243, 0.3) # 薄いボーダー
+		_current_style.bg_color = Color(0.047, 0.102, 0.047, 0.6) # #0c1a0c（不透明度0.6）
+		_current_style.border_color = Color(0.02, 0.12, 0.05, 0.3) # 薄いボーダー
 		_current_style.border_width_left = 1
 		_current_style.border_width_top = 1
 		_current_style.border_width_right = 1
@@ -78,8 +78,14 @@ func setup_empty() -> void:
 func update_value(value: HugeNumber) -> void:
 	# A列以外かつ数式セル（is_formula）ではない（＝空白セル）の場合は、完全に空白にする！
 	if not is_formula and not cell_id.begins_with("A"):
-		value_label.text = ""
+		if cell_id == "B1":
+			value_label.text = "行を追加で解放"
+			value_label.add_theme_font_size_override("font_size", 9)
+			value_label.add_theme_color_override("font_color", Color(0.16, 0.29, 0.16, 1.0)) # #2a4a2a
+		else:
+			value_label.text = ""
 	else:
+		value_label.remove_theme_font_size_override("font_size")
 		value_label.text = value.to_display_string()
 
 	# --- 桁数に応じた文字色 ---

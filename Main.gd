@@ -24,6 +24,24 @@ const CONTEXT_MENU_SCENE = preload("res://scenes/ContextMenu.tscn")
 # 現在表示中のCellノード { "A1": Cell, ... }
 var cell_nodes: Dictionary = {}
 var context_menu_node: Control = null
+var selected_cell_id: String = ""
+var col_header_nodes: Dictionary = {}
+var row_header_nodes: Dictionary = {}
+var status_left_label: Label = null
+var status_right_label: Label = null
+
+const UPGRADE_DESCRIPTIONS: Dictionary = {
+	"cell_value_a1": "定数 A1 の生産基礎値を +0.1 ハックする",
+	"cell_value_a2": "定数 A2 の生産基礎値を +0.1 ハックする",
+	"cell_value_a3": "定数 A3 の生産基礎値を +0.1 ハックする",
+	"cell_value_a4": "定数 A4 の生産基礎値を +0.1 ハックする",
+	"cell_value_a5": "定数 A5 の生産基礎値を +0.1 ハックする",
+	"cell_value_a6": "定数 A6 の生産基礎値を +0.1 ハックする",
+	"recalc_speed": "再計算のディレイを半分に加速する",
+	"add_sum": "B列にSUM関数を配置する能力を解放する",
+	"add_product": "C列にPRODUCT関数を配置する能力を解放する",
+	"add_fact": "D列にFACT関数を配置する能力を解放する"
+}
 
 # 動的グリッド用キャッシュ
 var _last_cols: int = 0
@@ -63,6 +81,186 @@ func _ready() -> void:
 	# 転生パネルは初期非表示
 	prestige_panel.visible = false
 
+	# 数式バーの高さ微調整（28px）および動的 fx ラベルの構築
+	var fbar = $UI/FormulaBar as PanelContainer
+	if fbar:
+		fbar.custom_minimum_size.y = 28
+		
+		# セルIDラベル: 幅36px、フォント色 #6aaa6a、フォントサイズ 12px
+		if cell_ref_label:
+			cell_ref_label.custom_minimum_size = Vector2(36, 0)
+			cell_ref_label.add_theme_color_override("font_color", Color(0.41, 0.66, 0.41, 1.0))
+			cell_ref_label.add_theme_font_size_override("font_size", 12)
+			cell_ref_label.text = "A1"
+			
+		# | セパレーター: 色 #2d4a2d
+		var separator = $UI/FormulaBar/HBox/Separator as Label
+		if separator:
+			separator.add_theme_color_override("font_color", Color(0.17, 0.29, 0.17, 1.0))
+			
+		# fxラベル: イタリック、色 #4a7a4a、フォントサイズ 11px
+		var fx_lbl := Label.new()
+		fx_lbl.text = "fx"
+		var italic_font := SystemFont.new()
+		italic_font.font_italic = true
+		italic_font.font_names = ["Arial", "Helvetica", "sans-serif"]
+		fx_lbl.add_theme_font_override("font", italic_font)
+		fx_lbl.add_theme_font_size_override("font_size", 11)
+		fx_lbl.add_theme_color_override("font_color", Color(0.29, 0.48, 0.29, 1.0))
+		
+		# 値フィールド: 残り幅、等幅フォント、色 #a0c8a0、サイズ 12px
+		if formula_text:
+			formula_text.add_theme_color_override("font_color", Color(0.62, 0.78, 0.62, 1.0))
+			var mono_font := SystemFont.new()
+			mono_font.font_names = ["Courier New", "Courier", "monospace"]
+			formula_text.add_theme_font_override("font", mono_font)
+			formula_text.add_theme_font_size_override("font_size", 12)
+		
+		var fbar_hbox = $UI/FormulaBar/HBox as HBoxContainer
+		if fbar_hbox:
+			fbar_hbox.add_child(fx_lbl)
+			fbar_hbox.move_child(fx_lbl, 2)
+
+	# TopBarの動大改修（高さ36px・統合三カラム・背景#0f1f0f）
+	var top_bar = $UI/TopBar as PanelContainer
+	if top_bar:
+		top_bar.custom_minimum_size.y = 36
+		var top_sb := StyleBoxFlat.new()
+		top_sb.bg_color = Color(0.06, 0.12, 0.06, 1.0) # #0f1f0f
+		top_sb.border_width_bottom = 1
+		top_sb.border_color = Color(0.02, 0.12, 0.05, 1.0)
+		top_sb.content_margin_left = 12
+		top_sb.content_margin_right = 0
+		top_sb.content_margin_top = 0
+		top_sb.content_margin_bottom = 0
+		top_bar.add_theme_stylebox_override("panel", top_sb)
+
+	var top_hbox = $UI/TopBar/HBox as HBoxContainer
+	if top_hbox:
+		top_hbox.remove_child(phase_label)
+		top_hbox.remove_child(value_display)
+		top_hbox.remove_child(dps_display)
+		
+		for child in top_hbox.get_children():
+			top_hbox.remove_child(child)
+			child.queue_free()
+			
+		# 1. LeftBox (Title + Phase Badge)
+		var left_box := HBoxContainer.new()
+		left_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		left_box.alignment = BoxContainer.ALIGNMENT_BEGIN
+		top_hbox.add_child(left_box)
+		
+		var title_lbl := Label.new()
+		title_lbl.text = "ExcelDestroyer"
+		title_lbl.add_theme_font_size_override("font_size", 13)
+		title_lbl.add_theme_color_override("font_color", Color(0.62, 0.78, 0.62, 1.0)) # #a0c8a0
+		var title_font := SystemFont.new()
+		title_font.font_names = ["Arial", "Helvetica", "sans-serif"]
+		title_lbl.add_theme_font_override("font", title_font)
+		left_box.add_child(title_lbl)
+		
+		var spacer_lbl := Control.new()
+		spacer_lbl.custom_minimum_size = Vector2(8, 0)
+		left_box.add_child(spacer_lbl)
+		
+		var phase_badge := PanelContainer.new()
+		var p_sb := StyleBoxFlat.new()
+		p_sb.bg_color = Color(0.04, 0.10, 0.04, 1.0) # #0a1a0a
+		p_sb.border_color = Color(0.16, 0.29, 0.16, 1.0) # #2a4a2a
+		p_sb.border_width_left = 1
+		p_sb.border_width_top = 1
+		p_sb.border_width_right = 1
+		p_sb.border_width_bottom = 1
+		p_sb.corner_radius_top_left = 2
+		p_sb.corner_radius_top_right = 2
+		p_sb.corner_radius_bottom_right = 2
+		p_sb.corner_radius_bottom_left = 2
+		p_sb.content_margin_left = 4
+		p_sb.content_margin_top = 4
+		p_sb.content_margin_right = 4
+		p_sb.content_margin_bottom = 4
+		phase_badge.add_theme_stylebox_override("panel", p_sb)
+		
+		phase_label.add_theme_font_size_override("font_size", 10)
+		phase_badge.add_child(phase_label)
+		left_box.add_child(phase_badge)
+		
+		# 2. CenterBox (🪙 79.0 のように中央配置)
+		var center_box := HBoxContainer.new()
+		center_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		center_box.alignment = BoxContainer.ALIGNMENT_CENTER
+		top_hbox.add_child(center_box)
+		
+		var coin_icon := Label.new()
+		coin_icon.text = "🪙 "
+		coin_icon.add_theme_font_size_override("font_size", 14)
+		center_box.add_child(coin_icon)
+		
+		value_display.add_theme_font_size_override("font_size", 14)
+		value_display.add_theme_color_override("font_color", Color(0.78, 0.90, 0.78, 1.0)) # #c8e6c8
+		
+		var mono_font := SystemFont.new()
+		mono_font.font_names = ["Courier New", "Courier", "monospace"]
+		value_display.add_theme_font_override("font", mono_font)
+		center_box.add_child(value_display)
+		
+		# 3. RightBox (DPS Display without panel - blends into background)
+		var right_box := HBoxContainer.new()
+		right_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		right_box.alignment = BoxContainer.ALIGNMENT_END
+		top_hbox.add_child(right_box)
+		
+		dps_display.add_theme_font_size_override("font_size", 12)
+		dps_display.add_theme_color_override("font_color", Color(0.41, 0.66, 0.41, 1.0)) # #6aaa6a
+		right_box.add_child(dps_display)
+		
+		var pad_right := Control.new()
+		pad_right.custom_minimum_size = Vector2(12, 0)
+		right_box.add_child(pad_right)
+		
+	# ショップのカード間隔を4pxに詰める
+	upgrade_list.add_theme_constant_override("separation", 4)
+
+	# サイドバー内の下部スペーサー（空のControl）の不要な縦方向拡大(SIZE_EXPAND_FILL)を完全無効化！
+	# これにより、UpgradeScroll（ショップ一覧）が縦幅全体に拡張され、初期状態でも一切のスクロールなしでUNLOCKSおよびSUMカードが1画面に収まるぜ！
+	var spacer_end = get_node_or_null("UI/ContentArea/Sidebar/SidebarMargin/SidebarVBox/SidebarSpacerEnd") as Control
+	if spacer_end:
+		spacer_end.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		spacer_end.custom_minimum_size.y = 2 # 必要最小限の空間に抑制
+
+	# 下部ステータスバーの動的生成
+	var status_bar := PanelContainer.new()
+	status_bar.custom_minimum_size.y = 20
+	
+	var s_sb := StyleBoxFlat.new()
+	s_sb.bg_color = Color(0.04, 0.08, 0.04, 1.0) # #0a150aベース
+	s_sb.content_margin_left = 8
+	s_sb.content_margin_right = 8
+	s_sb.content_margin_top = 2
+	s_sb.content_margin_bottom = 2
+	status_bar.add_theme_stylebox_override("panel", s_sb)
+	
+	var s_hbox := HBoxContainer.new()
+	s_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_bar.add_child(s_hbox)
+	
+	status_left_label = Label.new()
+	status_left_label.add_theme_font_size_override("font_size", 10)
+	status_left_label.add_theme_color_override("font_color", Color(0.35, 0.54, 0.35, 1.0)) # #5a8a5a
+	s_hbox.add_child(status_left_label)
+	
+	var s_spacer := Control.new()
+	s_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s_hbox.add_child(s_spacer)
+	
+	status_right_label = Label.new()
+	status_right_label.add_theme_font_size_override("font_size", 10)
+	status_right_label.add_theme_color_override("font_color", Color(0.35, 0.54, 0.35, 1.0))
+	s_hbox.add_child(status_right_label)
+	
+	$UI.add_child(status_bar)
+
 	# 右クリックコンテキストメニュー初期化
 	context_menu_node = CONTEXT_MENU_SCENE.instantiate()
 	add_child(context_menu_node)
@@ -72,12 +270,16 @@ func _ready() -> void:
 	_rebuild_spreadsheet()
 	_rebuild_upgrade_buttons()
 	_update_formula_bar()
+	_update_status_bar()
 	_update_phase_ui(GameManager.get_phase())
 
 	# スプレッドシートの親コンテナのリサイズを監視し、グリッドを動的に埋め尽くす
 	var parent_container = spreadsheet.get_parent().get_parent() as Control
 	if parent_container:
 		parent_container.resized.connect(_on_spreadsheet_resized)
+
+	# デバッグ用：今回だけ初期の計算速度を4倍速（1.0s -> 0.25s）にブースト
+	calc_timer.wait_time = 0.25
 
 	# タイマー開始
 	calc_timer.start()
@@ -109,16 +311,20 @@ func _on_cells_updated() -> void:
 		if cell_nodes.has(id):
 			cell_nodes[id].update_value(c.display_value)
 
+	# 数式バーの表示値を同期
+	_update_formula_bar()
+
 	# TopBar更新
 	value_display.text = GameManager.coins.to_display_string()
 	
 	# 真のDPS（1秒あたりのコイン獲得量）＝ 1tickの獲得量 × (1.0 / タイマー間隔)
 	var ticks_per_second: float = 1.0 / calc_timer.wait_time
 	var real_dps: HugeNumber = GameManager.last_tick_gain.multiply(HugeNumber.from_float(ticks_per_second))
-	dps_display.text   = "DPS: " + real_dps.to_display_string()
+	dps_display.text   = "DPS: " + real_dps.to_display_string() + " /s"
 
 	# アップグレードボタンの有効/無効を毎tick更新
 	_update_upgrade_affordability()
+	_update_status_bar()
 
 # --- #NUM! 発生 ---
 func _on_num_error_triggered() -> void:
@@ -143,6 +349,7 @@ func _on_prestige_done() -> void:
 	dps_display.text   = "DPS: 0"
 	prestige_count_lbl.text = "転生: %d回" % GameManager.prestige_count
 	_update_phase_ui(GameManager.get_phase())
+	_update_status_bar()
 
 # --- アップグレード適用後 ---
 func _on_upgrade_applied(id: String) -> void:
@@ -248,21 +455,19 @@ func _adjust_grid_dimensions() -> void:
 		
 	var viewport_size = get_viewport_rect().size
 	
-	# 親コンテナのサイズを直接使うと、セルの増減で親のサイズが変わり、
-	# さらなる再計算（無限ループ）を引き起こすため、ビューポートの絶対サイズを基準にする。
-	# サイドバー幅(220px) + マージン(16px) = 236px
-	var available_width = viewport_size.x - 236
-	# トップバー高(64px) + 数式バー高(34px) + マージン(16px) = 114px
-	var available_height = viewport_size.y - 114
+	# 親コンテナのサイズ直接使用を避け、無限ループを防ぐためビューポート基準の絶対サイズで計算。
+	# サイドバー(220px) + マージン(16px) + 行ヘッダー幅(36px) = 272px
+	var available_width = viewport_size.x - 272
+	# トップバー(64px) + 数式バー(28px) + マージン(16px) + 列ヘッダー高(24px) + ステータスバー(20px) = 152px
+	var available_height = viewport_size.y - 152
 	
 	# セルサイズ(110x60) + 間隔(4px) = 横114px / 縦64px
-	# ゲーム本編の解放列数・行数を下回らないように、画面幅を完璧に満たす列数・行数を計算
 	var cols = max(GameManager.max_columns, int(floor(available_width / 114.0)))
-	var rows = max(GameManager.max_rows, int(ceil(available_height / 64.0)))
+	var rows = max(GameManager.max_rows, int(floor(available_height / 64.0)))
 	
 	var active_count = GameManager.cells.size()
 	
-	# キャッシュ比較: 列数・行数・実セル数がいずれも変わっていなければ何もしない（超高速化）
+	# キャッシュ比較
 	if cols == _last_cols and rows == _last_rows and active_count == _last_cell_count:
 		return
 		
@@ -270,49 +475,143 @@ func _adjust_grid_dimensions() -> void:
 	_last_rows = rows
 	_last_cell_count = active_count
 	
-	# GridContainerの列数を動的に更新（画面幅分をタイル状に並べるためcolsを使う）
-	spreadsheet.columns = cols
+	# 列ヘッダーを含むため、GridContainerの列数を cols + 1 に設定
+	spreadsheet.columns = cols + 1
 	
-	# 既存セルを一度完全にクリーンアップ（remove_childしてからqueue_freeする安全策）
+	# 既存セル・ヘッダーをクリーンアップ
 	for child in spreadsheet.get_children():
 		spreadsheet.remove_child(child)
 		child.queue_free()
 	cell_nodes.clear()
+	col_header_nodes.clear()
+	row_header_nodes.clear()
 	
-	# グリッド（2次元）を走査して1列ずつ埋めていく
-	for r in range(rows):
-		for c in range(cols):
-			# 解放済みの本編ゲーム領域内（行・列ともにmax範囲内）かどうか判定
-			var is_active_area = r < GameManager.max_rows and c < GameManager.max_columns
-			if is_active_area:
-				var col_letter = String.chr(65 + c) # 65は 'A'
-				var cell_id = "%s%d" % [col_letter, r + 1]
+	# グリッド走査（ヘッダー含めて走査: rは-1〜rows-1, cは-1〜cols-1）
+	for r in range(-1, rows):
+		for c in range(-1, cols):
+			if r == -1 and c == -1:
+				# Corner Box
+				var corner := PanelContainer.new()
+				corner.custom_minimum_size = Vector2(36, 24)
+				var sb := StyleBoxFlat.new()
+				sb.bg_color = Color(0.04, 0.08, 0.04, 1.0) # #0a150aベース
+				sb.border_color = Color(0.02, 0.12, 0.05, 1.0) # グリッド枠線
+				sb.border_width_right = 1
+				sb.border_width_bottom = 1
+				corner.add_theme_stylebox_override("panel", sb)
+				spreadsheet.add_child(corner)
 				
-				if GameManager.cells.has(cell_id):
-					var cell_data = GameManager.cells[cell_id]
-					var cell_node = CELL_SCENE.instantiate()
-					spreadsheet.add_child(cell_node)
+			elif r == -1 and c >= 0:
+				# Column Header (A, B, C...)
+				var col_letter = String.chr(65 + c)
+				var header := PanelContainer.new()
+				header.custom_minimum_size = Vector2(110, 24)
+				
+				var sb := StyleBoxFlat.new()
+				sb.border_color = Color(0.02, 0.12, 0.05, 1.0)
+				sb.border_width_right = 1
+				sb.border_width_bottom = 1
+				
+				# max_columns未満（解放済み列数、上限5）ならラベルを描画
+				if c < GameManager.max_columns:
+					sb.bg_color = Color(0.05, 0.12, 0.05, 1.0) # #0e1f0eベース
+					header.add_theme_stylebox_override("panel", sb)
 					
-					# セルサイズ拡張は行わず、オリジナルの110x60を維持
-					cell_node.setup(cell_id, cell_data.cell_type == CellData.CellType.FORMULA)
+					var lbl := Label.new()
+					lbl.text = col_letter
+					lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+					lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+					lbl.add_theme_font_size_override("font_size", 10)
 					
-					if GameManager.is_num_error:
-						cell_node.show_error()
+					var sys_font := SystemFont.new()
+					sys_font.font_names = ["Courier New", "Courier", "monospace"]
+					lbl.add_theme_font_override("font", sys_font)
+					lbl.add_theme_color_override("font_color", Color(0.5, 0.7, 0.5, 1.0)) # #8ac88a
+					
+					header.add_child(lbl)
+					col_header_nodes[col_letter] = header
+				else:
+					# F列以降はヘッダーラベルなしの透明スペーサー
+					sb.bg_color = Color(0, 0, 0, 0)
+					header.add_theme_stylebox_override("panel", sb)
+					
+				spreadsheet.add_child(header)
+				
+			elif r >= 0 and c == -1:
+				# Row Header (1, 2, 3...)
+				var r_num = r + 1
+				var header := PanelContainer.new()
+				header.custom_minimum_size = Vector2(36, 60)
+				
+				var sb := StyleBoxFlat.new()
+				sb.border_color = Color(0.02, 0.12, 0.05, 1.0)
+				sb.border_width_right = 1
+				sb.border_width_bottom = 1
+				
+				# 6行以下（行の上限6）ならラベルを描画
+				if r_num <= 6:
+					sb.bg_color = Color(0.05, 0.12, 0.05, 1.0) # #0e1f0eベース
+					header.add_theme_stylebox_override("panel", sb)
+					
+					var lbl := Label.new()
+					lbl.text = str(r_num)
+					lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+					lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+					lbl.add_theme_font_size_override("font_size", 10)
+					
+					var sys_font := SystemFont.new()
+					sys_font.font_names = ["Courier New", "Courier", "monospace"]
+					lbl.add_theme_font_override("font", sys_font)
+					
+					# 解放済み: #5a8a5a, 未解放: #2a4a2a
+					if r_num <= GameManager.max_rows:
+						lbl.add_theme_color_override("font_color", Color(0.35, 0.54, 0.35, 1.0))
 					else:
-						cell_node.update_value(cell_data.display_value)
+						lbl.add_theme_color_override("font_color", Color(0.16, 0.29, 0.16, 1.0))
+					
+					header.add_child(lbl)
+					row_header_nodes[r_num] = header
+				else:
+					# 7行目以降はヘッダーラベルなしの透明スペーサー
+					sb.bg_color = Color(0, 0, 0, 0)
+					header.add_theme_stylebox_override("panel", sb)
+					
+				spreadsheet.add_child(header)
+				
+			else:
+				# Cell
+				var is_active_area = r < GameManager.max_rows and c < GameManager.max_columns
+				if is_active_area:
+					var col_letter = String.chr(65 + c)
+					var cell_id = "%s%d" % [col_letter, r + 1]
+					
+					if GameManager.cells.has(cell_id):
+						var cell_data = GameManager.cells[cell_id]
+						var cell_node = CELL_SCENE.instantiate()
+						spreadsheet.add_child(cell_node)
 						
-					# リモート新機能: インスペクターや右クリックコンテキストのシグナル接続
-					cell_node.cell_clicked.connect(_on_cell_clicked)
-					cell_node.cell_double_clicked.connect(_on_cell_double_clicked)
-					cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
-					
-					cell_nodes[cell_id] = cell_node
-					continue # 配置完了
-					
-			# 解放されていない枠、または画面の余白部分はすべてダミーセルで埋め尽くす
-			var dummy_node = CELL_SCENE.instantiate()
-			spreadsheet.add_child(dummy_node)
-			dummy_node.setup_empty()
+						cell_node.setup(cell_id, cell_data.cell_type == CellData.CellType.FORMULA)
+						
+						if GameManager.is_num_error:
+							cell_node.show_error()
+						else:
+							cell_node.update_value(cell_data.display_value)
+							
+						cell_node.cell_clicked.connect(_on_cell_clicked)
+						cell_node.cell_double_clicked.connect(_on_cell_double_clicked)
+						cell_node.cell_right_clicked.connect(_on_cell_right_clicked)
+						
+						cell_nodes[cell_id] = cell_node
+						continue
+						
+				# Dummy Cell
+				var dummy_node = CELL_SCENE.instantiate()
+				spreadsheet.add_child(dummy_node)
+				dummy_node.setup_empty()
+				
+	# 選択セルのヘッダーハイライトを復元
+	if selected_cell_id != "":
+		_update_header_highlights(selected_cell_id)
 
 # ==============================================
 # コンテナリサイズ時のイベント
@@ -329,92 +628,185 @@ func _rebuild_upgrade_buttons() -> void:
 		upgrade_list.remove_child(child)
 		child.queue_free()
 
+	# 1. 通常カードの選別と描画
+	var normal_upgs: Array = []
 	for upg in GameManager.upgrades:
 		# すでに購入済みの1回限りアンロック系アップグレードカードはショップから完全に非表示にする！
 		if upg["max"] == 1 and upg["purchased"] >= 1:
 			continue
 			
-		# まだ解放されていないセルのアップグレードカードは非表示
-		if upg["id"] == "cell_value_a2" and GameManager.max_rows < 2:
-			continue
-		if upg["id"] == "cell_value_a3" and GameManager.max_rows < 3:
-			continue
-		if upg["id"] == "cell_value_a4" and GameManager.max_rows < 4:
-			continue
-		if upg["id"] == "cell_value_a5" and GameManager.max_rows < 5:
-			continue
-		if upg["id"] == "cell_value_a6" and GameManager.max_rows < 6:
-			continue
+		var is_unlock_card = upg["id"] in ["add_sum", "add_product", "add_fact"]
+		if not is_unlock_card:
+			# 通常カードのロック条件判定
+			var is_locked := false
+			var lock_text := ""
+			match upg["id"]:
+				"cell_value_a2":
+					if GameManager.max_rows < 2:
+						is_locked = true
+						lock_text = "2行目が必要"
+				"cell_value_a3":
+					if GameManager.max_rows < 3:
+						is_locked = true
+						lock_text = "3行目が必要"
+				"cell_value_a4":
+					if GameManager.max_rows < 4:
+						is_locked = true
+						lock_text = "4行目が必要"
+				"cell_value_a5":
+					if GameManager.max_rows < 5:
+						is_locked = true
+						lock_text = "5行目が必要"
+				"cell_value_a6":
+					if GameManager.max_rows < 6:
+						is_locked = true
+						lock_text = "6行目が必要"
 			
-		# 段階的表示: 行を増やす（2行以上になる）まで SUM カードは非表示！
-		if upg["id"] == "add_sum" and GameManager.max_rows < 2:
-			continue
-			
-		# SUM を購入するまで PRODUCT カードは非表示！
-		if upg["id"] == "add_product":
-			var sum_purchased := false
-			for u in GameManager.upgrades:
-				if u["id"] == "add_sum" and u["purchased"] == 1:
-					sum_purchased = true
-					break
-			if not sum_purchased:
-				continue
-
-		# PRODUCT を購入するまで FACT カードは非表示！
-		if upg["id"] == "add_fact":
-			var product_purchased := false
-			for u in GameManager.upgrades:
-				if u["id"] == "add_product" and u["purchased"] == 1:
-					product_purchased = true
-					break
-			if not product_purchased:
+			# 通常カードは条件未達成（ロック中）なら完全に非表示にする（既存仕様を尊重！）
+			if is_locked:
 				continue
 				
-		var card := _make_upgrade_card(upg)
+			normal_upgs.append(upg)
+
+	for upg in normal_upgs:
+		var card := _make_upgrade_card(upg, false, "")
 		upgrade_list.add_child(card)
 
-func _make_upgrade_card(upg: Dictionary) -> Control:
+	# 2. アンロックカードの選別と描画
+	var unlock_upgs: Array = []
+	for upg in GameManager.upgrades:
+		if upg["max"] == 1 and upg["purchased"] >= 1:
+			continue
+			
+		var is_unlock_card = upg["id"] in ["add_sum", "add_product", "add_fact"]
+		if is_unlock_card:
+			var is_locked := false
+			var lock_text := ""
+			match upg["id"]:
+				"add_sum":
+					if GameManager.max_rows < 2:
+						is_locked = true
+						lock_text = "2行解放で使用可能"
+				"add_product":
+					var sum_purchased := false
+					for u in GameManager.upgrades:
+						if u["id"] == "add_sum" and u["purchased"] == 1:
+							sum_purchased = true
+							break
+					if not sum_purchased:
+						is_locked = true
+						lock_text = "SUMアンロックが必要"
+				"add_fact":
+					var product_purchased := false
+					for u in GameManager.upgrades:
+						if u["id"] == "add_product" and u["purchased"] == 1:
+							product_purchased = true
+							break
+					if not product_purchased:
+						is_locked = true
+						lock_text = "PRODUCTアンロックが必要"
+			
+			unlock_upgs.append({ "upg": upg, "is_locked": is_locked, "lock_text": lock_text })
+
+	# 通常とアンロックの間に見出しと境界線を追加
+	if not unlock_upgs.is_empty():
+		var spacer_top := Control.new()
+		spacer_top.custom_minimum_size = Vector2(0, 2)
+		upgrade_list.add_child(spacer_top)
+		
+		var unlocks_lbl := Label.new()
+		unlocks_lbl.text = " — UNLOCKS — "
+		unlocks_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		unlocks_lbl.add_theme_font_size_override("font_size", 10)
+		unlocks_lbl.add_theme_color_override("font_color", Color(0.16, 0.48, 0.29, 1.0)) # #2a7a4a
+		upgrade_list.add_child(unlocks_lbl)
+		
+		var sep := HSeparator.new()
+		sep.add_theme_color_override("color", Color(0.16, 0.48, 0.29, 0.4))
+		upgrade_list.add_child(sep)
+		
+		var spacer_bot := Control.new()
+		spacer_bot.custom_minimum_size = Vector2(0, 2)
+		upgrade_list.add_child(spacer_bot)
+
+		for entry in unlock_upgs:
+			var card := _make_upgrade_card(entry["upg"], entry["is_locked"], entry["lock_text"])
+			upgrade_list.add_child(card)
+
+func _make_upgrade_card(upg: Dictionary, is_locked: bool = false, lock_text: String = "") -> Control:
 	var cost: HugeNumber = GameManager.get_upgrade_cost(upg["id"])
 	var is_maxed: bool = upg["purchased"] >= upg["max"]
-	var can_afford: bool = (not is_maxed) and GameManager.can_afford(cost)
+	var can_afford: bool = (not is_maxed) and (not is_locked) and GameManager.can_afford(cost)
 
 	# カード用PanelContainer
 	var card := PanelContainer.new()
 	card.name = upg["id"]
+	if is_locked:
+		card.modulate.a = 0.5
+
+	var is_unlock_card = upg["id"] in ["add_sum", "add_product", "add_fact"]
 
 	var sb := StyleBoxFlat.new()
-	if is_maxed:
-		sb.bg_color = Color(0.04, 0.10, 0.04, 1)
-		sb.border_color = Color(0.1, 0.4, 0.1, 0.6)
-	elif can_afford:
-		sb.bg_color = Color(0.07, 0.17, 0.10, 1)
-		sb.border_color = Color(0.13, 0.98, 0.56, 0.9)
+	sb.bg_color = Color(0.04, 0.10, 0.04, 1.0) # #0a1a0a
+	
+	if is_unlock_card:
+		sb.border_width_left = 3
+		sb.border_color = Color(0.16, 0.48, 0.29, 1.0) # #2a7a4a
 	else:
-		sb.bg_color = Color(0.06, 0.10, 0.18, 1)
-		sb.border_color = Color(0.15, 0.25, 0.40, 0.6)
-	sb.border_width_left   = 1
-	sb.border_width_top    = 1
-	sb.border_width_right  = 1
+		sb.border_width_left = 1
+		if is_maxed:
+			sb.border_color = Color(0.1, 0.4, 0.1, 0.6)
+		elif can_afford:
+			sb.border_color = Color(0.23, 0.54, 0.23, 1.0) # #3a8a3a
+		else:
+			sb.border_color = Color(0.16, 0.29, 0.16, 1.0) # #2a4a2a
+			
+	sb.border_width_top = 1
+	sb.border_width_right = 1
 	sb.border_width_bottom = 1
-	sb.corner_radius_top_left     = 4
-	sb.corner_radius_top_right    = 4
+	sb.corner_radius_top_left = 4
+	sb.corner_radius_top_right = 4
 	sb.corner_radius_bottom_right = 4
-	sb.corner_radius_bottom_left  = 4
+	sb.corner_radius_bottom_left = 4
+	sb.content_margin_left = 8
+	sb.content_margin_top = 6
+	sb.content_margin_right = 8
+	sb.content_margin_bottom = 6
 	card.add_theme_stylebox_override("panel", sb)
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 4)
 	card.add_child(vbox)
 
-	# アップグレード名ラベル
+	# 1行目: アップグレード名
 	var name_lbl := Label.new()
 	name_lbl.text = upg["label"]
 	name_lbl.add_theme_font_size_override("font_size", 12)
-	name_lbl.add_theme_color_override("font_color",
-		Color(0.5, 0.8, 0.5, 1) if is_maxed else Color(0.9, 0.9, 0.9, 1))
+	name_lbl.add_theme_color_override("font_color", Color(0.54, 0.78, 0.54, 1.0) # #8ac88a
+		if is_maxed or is_locked else Color(0.85, 0.95, 0.85, 1.0))
 	vbox.add_child(name_lbl)
 
-	# コスト / MAX ラベル
+	# 2行目: 説明文
+	var desc_lbl := Label.new()
+	desc_lbl.text = UPGRADE_DESCRIPTIONS.get(upg["id"], "")
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 10)
+	desc_lbl.add_theme_color_override("font_color", Color(0.29, 0.48, 0.29, 1.0)) # #4a7a4a
+	vbox.add_child(desc_lbl)
+
+	# 🔒 条件テキスト表示（ロック中のみ）
+	if is_locked:
+		var cond_lbl := Label.new()
+		cond_lbl.text = "🔒 必要: " + lock_text
+		cond_lbl.add_theme_font_size_override("font_size", 9)
+		cond_lbl.add_theme_color_override("font_color", Color(0.65, 0.35, 0.35, 1.0)) # 薄い赤
+		vbox.add_child(cond_lbl)
+
+	# 3行目: コイン＋コスト＋「購入」ボタンの横並び
+	var row_hbox := HBoxContainer.new()
+	row_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(row_hbox)
+
 	var cost_lbl := Label.new()
 	if is_maxed:
 		cost_lbl.text = "MAX"
@@ -422,22 +814,59 @@ func _make_upgrade_card(upg: Dictionary) -> Control:
 	else:
 		cost_lbl.text = "💰 " + cost.to_display_string()
 		cost_lbl.add_theme_color_override("font_color",
-			Color(0.13, 0.98, 0.56, 1) if can_afford else Color(0.5, 0.5, 0.5, 1))
+			Color(0.13, 0.98, 0.56, 1.0) if can_afford else Color(0.5, 0.5, 0.5, 1.0))
 	cost_lbl.add_theme_font_size_override("font_size", 10)
-	vbox.add_child(cost_lbl)
+	row_hbox.add_child(cost_lbl)
 
-	# 購入ボタン
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row_hbox.add_child(spacer)
+
+	# 購入ボタン (Excel風フラットボーダーデザイン)
 	if not is_maxed:
 		var btn := Button.new()
-		btn.name = "BuyBtn"  # find_child()で検索するための名前
+		btn.name = "BuyBtn"
 		btn.text = "購入"
-		btn.add_theme_font_size_override("font_size", 11)
-		btn.disabled = not can_afford
+		btn.add_theme_font_size_override("font_size", 10)
+		btn.disabled = not can_afford or is_locked
 		btn.pressed.connect(_on_upgrade_pressed.bind(upg["id"]))
-		vbox.add_child(btn)
+		
+		# ボタンのカスタムフラットスタイルを設定
+		var normal_style := StyleBoxFlat.new()
+		normal_style.bg_color = Color(0, 0, 0, 0)
+		normal_style.border_color = Color(0.13, 0.98, 0.56, 0.6)
+		normal_style.border_width_left = 1
+		normal_style.border_width_top = 1
+		normal_style.border_width_right = 1
+		normal_style.border_width_bottom = 1
+		normal_style.corner_radius_top_left = 2
+		normal_style.corner_radius_top_right = 2
+		normal_style.corner_radius_bottom_right = 2
+		normal_style.corner_radius_bottom_left = 2
+		normal_style.content_margin_left = 4
+		normal_style.content_margin_top = 4
+		normal_style.content_margin_right = 4
+		normal_style.content_margin_bottom = 4
+		btn.add_theme_stylebox_override("normal", normal_style)
+		
+		var hover_style := normal_style.duplicate() as StyleBoxFlat
+		hover_style.bg_color = Color(0.13, 0.98, 0.56, 0.15)
+		hover_style.border_color = Color(0.13, 0.98, 0.56, 1.0)
+		btn.add_theme_stylebox_override("hover", hover_style)
+		
+		var pressed_style := normal_style.duplicate() as StyleBoxFlat
+		pressed_style.bg_color = Color(0.13, 0.98, 0.56, 0.3)
+		pressed_style.border_color = Color(0.13, 0.98, 0.56, 1.0)
+		btn.add_theme_stylebox_override("pressed", pressed_style)
+		
+		var disabled_style := normal_style.duplicate() as StyleBoxFlat
+		disabled_style.border_color = Color(0.3, 0.3, 0.3, 0.4)
+		btn.add_theme_stylebox_override("disabled", disabled_style)
+
+		row_hbox.add_child(btn)
 
 		# 買えるときに脈動アニメ
-		if can_afford:
+		if can_afford and not is_locked:
 			var tween = btn.create_tween().set_loops()
 			tween.tween_property(btn, "modulate",
 				Color(1.2, 1.4, 1.1, 1.0), 0.5)
@@ -497,22 +926,45 @@ func _on_prestige_button_pressed() -> void:
 			node.modulate = Color(1, 1, 1, 1)
 	GameManager.do_prestige()
 
-# --- FormulaBar更新（最後のFormulaCellを固定表示） ---
-func _update_formula_bar() -> void:
-	var last_formula_id: String = ""
-	for id in GameManager.cell_order:
-		var c: CellData = GameManager.cells[id]
-		if c.cell_type == CellData.CellType.FORMULA:
-			last_formula_id = id
+# --- FormulaBar更新（選択中のセルのIDと値・数式を同期） ---
+func _update_formula_bar(selected_id: String = "") -> void:
+	var target_id = selected_id
+	if target_id == "":
+		target_id = selected_cell_id
+	if target_id == "":
+		target_id = "A1"
 
-	if last_formula_id == "":
-		cell_ref_label.text = ""
+	if not GameManager.cells.has(target_id):
+		cell_ref_label.text = target_id
 		formula_text.text   = ""
 		return
 
-	var lc: CellData = GameManager.cells[last_formula_id]
-	cell_ref_label.text = last_formula_id
-	formula_text.text   = FormulaEngine.formula_to_string(lc)
+	var c: CellData = GameManager.cells[target_id]
+	cell_ref_label.text = target_id
+	if c.cell_type == CellData.CellType.FORMULA:
+		formula_text.text = FormulaEngine.formula_to_string(c)
+	else:
+		formula_text.text = c.raw_value.to_display_string()
+
+# --- 下部ステータスバー更新 ---
+func _update_status_bar() -> void:
+	if not is_instance_valid(status_left_label) or not is_instance_valid(status_right_label):
+		return
+		
+	var max_col_letter = String.chr(65 + GameManager.max_columns - 1)
+	var active_cells_count = GameManager.cells.size()
+	
+	var overflow_limit = "1.79e308"
+	if GameManager.prestige_count > 0:
+		overflow_limit = "1.79e%d" % (308 + GameManager.prestige_count)
+		
+	status_left_label.text = "セル数: %d ｜ 解放列: %s ｜ オーバーフロー上限: %s" % [
+		active_cells_count,
+		max_col_letter,
+		overflow_limit
+	]
+	
+	status_right_label.text = "マルチプライヤー: x%d" % GameManager.prestige_multiplier
 
 # ==============================================
 # 入力・イベント制御 (メニュー領域外クリックキャンセルなど)
@@ -524,17 +976,68 @@ func _input(event: InputEvent) -> void:
 				if not context_menu_node.get_global_rect().has_point(event.global_position):
 					context_menu_node.visible = false
 
+# --- ヘッダー選択ハイライト更新 ---
+func _update_header_highlights(selected_id: String) -> void:
+	selected_cell_id = selected_id
+	var sel_col = selected_id.substr(0, 1) if selected_id != "" else ""
+	var sel_row = int(selected_id.substr(1)) if selected_id != "" else 0
+
+	# 1. 列ヘッダー
+	for col_letter in col_header_nodes:
+		var panel: PanelContainer = col_header_nodes[col_letter]
+		var label: Label = panel.get_child(0) as Label
+		var sb: StyleBoxFlat = panel.get_theme_stylebox("panel") as StyleBoxFlat
+		if not sb:
+			continue
+		
+		# スタイルボックスを複製して個別ハイライトする
+		sb = sb.duplicate() as StyleBoxFlat
+		panel.add_theme_stylebox_override("panel", sb)
+
+		var c_idx = col_letter.unicode_at(0) - 65
+		
+		if col_letter == sel_col:
+			label.add_theme_color_override("font_color", Color(0.62, 0.78, 0.62, 1.0)) # #a0c8a0ハイライト
+			sb.border_width_bottom = 2
+			sb.border_color = Color(0.62, 0.78, 0.62, 1.0)
+		else:
+			sb.border_width_bottom = 1
+			sb.border_color = Color(0.02, 0.12, 0.05, 1.0)
+			if c_idx < GameManager.max_columns:
+				label.add_theme_color_override("font_color", Color(0.5, 0.7, 0.5, 1.0)) # #8ac88a
+			else:
+				label.add_theme_color_override("font_color", Color(0.22, 0.41, 0.22, 1.0)) # #3a6a3a
+
+	# 2. 行ヘッダー
+	for r_num in row_header_nodes:
+		var panel: PanelContainer = row_header_nodes[r_num]
+		var label: Label = panel.get_child(0) as Label
+		var sb: StyleBoxFlat = panel.get_theme_stylebox("panel") as StyleBoxFlat
+		if not sb:
+			continue
+		
+		sb = sb.duplicate() as StyleBoxFlat
+		panel.add_theme_stylebox_override("panel", sb)
+		
+		if r_num == sel_row:
+			label.add_theme_color_override("font_color", Color(0.62, 0.78, 0.62, 1.0)) # #a0c8a0ハイライト
+			sb.border_width_right = 2
+			sb.border_color = Color(0.62, 0.78, 0.62, 1.0)
+		else:
+			sb.border_width_right = 1
+			sb.border_color = Color(0.02, 0.12, 0.05, 1.0)
+			if r_num <= GameManager.max_rows:
+				label.add_theme_color_override("font_color", Color(0.35, 0.54, 0.35, 1.0)) # #5a8a5a
+			else:
+				label.add_theme_color_override("font_color", Color(0.16, 0.29, 0.16, 1.0)) # #2a4a2a
+
 # --- 左クリック選択時の数式バー更新 ---
 func _on_cell_clicked(id: String) -> void:
 	if context_menu_node:
 		context_menu_node.visible = false # 左クリック時はポップアップを閉じる
 
-	var c: CellData = GameManager.cells[id]
-	cell_ref_label.text = id
-	if c.cell_type == CellData.CellType.FORMULA:
-		formula_text.text = FormulaEngine.formula_to_string(c)
-	else:
-		formula_text.text = c.raw_value.to_display_string()
+	_update_header_highlights(id)
+	_update_formula_bar(id)
 
 # --- 右クリック時のメニュー呼び出し ---
 func _on_cell_right_clicked(id: String, mouse_pos: Vector2) -> void:
@@ -554,11 +1057,11 @@ func _on_cell_right_clicked(id: String, mouse_pos: Vector2) -> void:
 			"column_cost": next_col_cost.to_display_string(),
 			"can_add_row": GameManager.max_rows < 6 and GameManager.can_afford(GameManager.get_next_row_cost()),
 			"row_cost": GameManager.get_next_row_cost().to_display_string(),
-			"sum_locked": GameManager.max_columns < 2 or not is_purchased.call("add_sum"),
-			"product_locked": GameManager.max_columns < 2 or not is_purchased.call("add_product"),
-			"fact_locked": GameManager.max_columns < 2 or not is_purchased.call("add_fact"),
-			"power_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 1,
-			"tower_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 2,
+			"sum_locked": GameManager.max_columns < 2 or not is_purchased.call("add_sum") or id.begins_with("A"),
+			"product_locked": GameManager.max_columns < 2 or not is_purchased.call("add_product") or id.begins_with("A"),
+			"fact_locked": GameManager.max_columns < 2 or not is_purchased.call("add_fact") or id.begins_with("A"),
+			"power_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 1 or id.begins_with("A"),
+			"tower_locked": GameManager.max_columns < 2 or GameManager.prestige_count < 2 or id.begins_with("A"),
 			
 			# 段階的アンロック（前の関数を解放していないと非表示）
 			"sum_visible": GameManager.max_rows >= 2,
@@ -584,11 +1087,11 @@ func _on_context_menu_action_selected(action: String, extra: String) -> void:
 
 func _apply_context_formula(cell_id: String, formula_name: String) -> void:
 	var cost_map = {
-		"SUM": HugeNumber.from_float(100.0),
-		"PRODUCT": HugeNumber.from_float(2000.0),
-		"POWER": HugeNumber.new(5.0, 4), # 5e4 (50,000.0)
-		"FACT": HugeNumber.new(1.0, 6), # 1e6 (1,000,000.0)
-		"TOWER": HugeNumber.new(5.0, 7) # 5e7 (50,000,000.0)
+		"SUM": HugeNumber.from_float(10.0),
+		"PRODUCT": HugeNumber.from_float(200.0),
+		"FACT": HugeNumber.from_float(1000.0),
+		"POWER": HugeNumber.new(5.0, 4),  # 50,000.0
+		"TOWER": HugeNumber.new(1.0, 6)  # 1,000,000.0
 	}
 	var cost: HugeNumber = cost_map.get(formula_name, HugeNumber.new(0.0, 0))
 	if GameManager.coins.compare(cost) < 0:
@@ -603,27 +1106,30 @@ func _apply_context_formula(cell_id: String, formula_name: String) -> void:
 	var row = int(cell_id.substr(1))
 	var prev_col_letter = String.chr(col_letter.unicode_at(0) - 1)
 	
-	c.formula_type = CellData.FormulaType.get(formula_name)
-	
 	match formula_name:
 		"SUM":
+			c.formula_type = CellData.FormulaType.SUM
 			if row == 1:
 				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
 			else:
 				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
 		"PRODUCT":
+			c.formula_type = CellData.FormulaType.PRODUCT
 			if row == 1:
 				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
 			else:
 				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
 		"POWER":
+			c.formula_type = CellData.FormulaType.POWER
 			if row == 1:
 				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
 			else:
 				c.inputs = ["%s%d" % [col_letter, row - 1], "%s%d" % [prev_col_letter, row]]
 		"FACT":
+			c.formula_type = CellData.FormulaType.FACT
 			c.inputs = ["%s%d" % [prev_col_letter, row]]
 		"TOWER":
+			c.formula_type = CellData.FormulaType.TOWER
 			if row == 1:
 				c.inputs = ["%s1" % prev_col_letter, "%s2" % prev_col_letter]
 			else:
@@ -659,6 +1165,7 @@ func _apply_context_delete_formula(cell_id: String) -> void:
 var _current_detail_popup: PanelContainer = null
 
 func _on_cell_double_clicked(cell_id: String) -> void:
+	_on_cell_clicked(cell_id)
 	if _current_detail_popup and is_instance_valid(_current_detail_popup):
 		_current_detail_popup.queue_free()
 		
@@ -683,7 +1190,10 @@ func _on_cell_double_clicked(cell_id: String) -> void:
 	sb.corner_radius_top_right = 6
 	sb.corner_radius_bottom_right = 6
 	sb.corner_radius_bottom_left = 6
-	sb.set_content_margin_all(12)
+	sb.content_margin_left = 12
+	sb.content_margin_top = 12
+	sb.content_margin_right = 12
+	sb.content_margin_bottom = 12
 	popup.add_theme_stylebox_override("panel", sb)
 	
 	# レイアウト構成
