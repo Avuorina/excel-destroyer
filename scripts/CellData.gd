@@ -4,6 +4,7 @@ class_name CellData
 
 enum CellType    { INPUT, FORMULA }
 enum FormulaType { SUM, PRODUCT, FACT, POWER, TOWER }
+enum CellIntervalType { CONSTANT, SUM, PRODUCT, FACT, POWER, TOWER }
 
 var cell_id: String       # "A1", "A2", "B1" など
 var cell_type: CellType

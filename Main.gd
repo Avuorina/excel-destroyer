@@ -3,7 +3,17 @@
 extends Control
 
 # --- ノード参照 ---
-@onready var calc_timer:         Timer          = $CalcTimer
+# --- 独立タイマー管理 ---
+var cell_timers: Dictionary = {}  # CellData.CellIntervalType -> Timer
+
+const BASE_INTERVALS: Dictionary = {
+	CellData.CellIntervalType.CONSTANT: 1.0,
+	CellData.CellIntervalType.SUM:      5.0,
+	CellData.CellIntervalType.PRODUCT:  15.0,
+	CellData.CellIntervalType.FACT:     60.0,
+	CellData.CellIntervalType.POWER:    120.0,
+	CellData.CellIntervalType.TOWER:    300.0,
+}
 @onready var value_display:      Label          = $UI/TopBar/HBox/ValueDisplay
 @onready var dps_display:        Label          = $UI/TopBar/HBox/DPSDisplay
 @onready var phase_label:        Label          = $UI/TopBar/HBox/PhaseLabel
@@ -37,10 +47,33 @@ const UPGRADE_DESCRIPTIONS: Dictionary = {
 	"cell_value_a4": "定数 A4 の生産基礎値を +0.1 ハックする",
 	"cell_value_a5": "定数 A5 の生産基礎値を +0.1 ハックする",
 	"cell_value_a6": "定数 A6 の生産基礎値を +0.1 ハックする",
-	"recalc_speed": "再計算のディレイを半分に加速する",
 	"add_sum": "B列にSUM関数を配置する能力を解放する",
 	"add_product": "C列にPRODUCT関数を配置する能力を解放する",
-	"add_fact": "D列にFACT関数を配置する能力を解放する"
+	"add_fact": "D列にFACT関数を配置する能力を解放する",
+
+	"prod_constant_1": "定数セルの加算値を2倍にハックする",
+	"prod_constant_2": "定数セルの加算値を4倍にハックする",
+	"prod_constant_3": "定数セルの加算値を8倍にハックする",
+	"prod_constant_4": "定数セルの加算値を16倍にハックする",
+	"prod_constant_5": "定数セルの加算値を32倍にハックする",
+
+	"prod_sum_1": "SUM関数の加算値を2倍にハックする",
+	"prod_sum_2": "SUM関数の加算値を4倍にハックする",
+	"prod_sum_3": "SUM関数の加算値を8倍にハックする",
+	"prod_sum_4": "SUM関数の加算値を16倍にハックする",
+	"prod_sum_5": "SUM関数の加算値を32倍にハックする",
+
+	"prod_product_1": "PRODUCT関数の加算値を2倍にハックする",
+	"prod_product_2": "PRODUCT関数の加算値を4倍にハックする",
+	"prod_product_3": "PRODUCT関数の加算値を8倍にハックする",
+	"prod_product_4": "PRODUCT関数の加算値を16倍にハックする",
+	"prod_product_5": "PRODUCT関数の加算値を32倍にハックする",
+
+	"prod_fact_1": "FACT関数の加算値を2倍にハックする",
+	"prod_fact_2": "FACT関数の加算値を4倍にハックする",
+	"prod_fact_3": "FACT関数の加算値を8倍にハックする",
+	"prod_fact_4": "FACT関数の加算値を16倍にハックする",
+	"prod_fact_5": "FACT関数の加算値を32倍にハックする"
 }
 
 # 動的グリッド用キャッシュ
@@ -75,8 +108,6 @@ func _ready() -> void:
 	GameManager.upgrade_applied.connect(_on_upgrade_applied)
 	GameManager.phase_changed.connect(_on_phase_changed)
 
-	# タイマー接続
-	calc_timer.timeout.connect(_on_calc_timer_timeout)
 
 	# 転生パネルは初期非表示
 	prestige_panel.visible = false
@@ -278,11 +309,8 @@ func _ready() -> void:
 	if parent_container:
 		parent_container.resized.connect(_on_spreadsheet_resized)
 
-	# デバッグ用：今回だけ初期の計算速度を4倍速（1.0s -> 0.25s）にブースト
-	calc_timer.wait_time = 0.25
-
-	# タイマー開始
-	calc_timer.start()
+	# 独立関数タイマー群の初期化・起動
+	_setup_cell_timers()
 
 # --- メインループ（グリッチ判定）---
 func _process(delta: float) -> void:
@@ -293,9 +321,27 @@ func _process(delta: float) -> void:
 		if phase != GameManager.GamePhase.NORMAL:
 			_do_glitch_frame()
 
-# --- タイマーtick ---
-func _on_calc_timer_timeout() -> void:
-	GameManager.recalculate()
+# --- タイマー初期化・起動 ---
+func _setup_cell_timers() -> void:
+	# 既存タイマーをクリーンアップ
+	for t in cell_timers.values():
+		if is_instance_valid(t):
+			t.stop()
+			t.queue_free()
+	cell_timers.clear()
+
+	for cell_type in BASE_INTERVALS.keys():
+		var t := Timer.new()
+		t.name = "CellTimer_%s" % CellData.CellIntervalType.keys()[cell_type]
+		t.wait_time = BASE_INTERVALS[cell_type]
+		t.autostart = true
+		t.timeout.connect(_on_cell_timer_timeout.bind(cell_type))
+		add_child(t)
+		cell_timers[cell_type] = t
+
+# --- タイマー別実行間隔のタイムアウト（再計算＆コイン加算） ---
+func _on_cell_timer_timeout(cell_type: int) -> void:
+	GameManager.recalculate_for_type(cell_type)
 
 # --- セル更新 ---
 func _on_cells_updated() -> void:
@@ -317,10 +363,9 @@ func _on_cells_updated() -> void:
 	# TopBar更新
 	value_display.text = GameManager.coins.to_display_string()
 	
-	# 真のDPS（1秒あたりのコイン獲得量）＝ 1tickの獲得量 × (1.0 / タイマー間隔)
-	var ticks_per_second: float = 1.0 / calc_timer.wait_time
-	var real_dps: HugeNumber = GameManager.last_tick_gain.multiply(HugeNumber.from_float(ticks_per_second))
-	dps_display.text   = "DPS: " + real_dps.to_display_string() + " /s"
+	# 真のDPS（各独立タイマーの期待獲得コインの総和を算出）
+	var real_dps: HugeNumber = GameManager.calc_total_dps(cell_timers)
+	dps_display.text = "DPS: " + real_dps.to_display_string() + " /s"
 
 	# アップグレードボタンの有効/無効を毎tick更新
 	_update_upgrade_affordability()
@@ -342,6 +387,8 @@ func _on_num_error_triggered() -> void:
 # --- 転生完了 ---
 func _on_prestige_done() -> void:
 	prestige_panel.visible = false
+	_setup_cell_timers()    # 独立タイマーを再初期化
+	
 	_rebuild_spreadsheet()
 	_rebuild_upgrade_buttons()
 	_update_formula_bar()
@@ -353,8 +400,7 @@ func _on_prestige_done() -> void:
 
 # --- アップグレード適用後 ---
 func _on_upgrade_applied(id: String) -> void:
-	if id == "recalc_speed":
-		calc_timer.wait_time = max(0.1, calc_timer.wait_time * 0.5)
+	pass
 
 # --- フェーズ変化 ---
 func _on_phase_changed(new_phase: GameManager.GamePhase) -> void:
@@ -621,6 +667,39 @@ func _on_spreadsheet_resized() -> void:
 	_adjust_grid_dimensions()
 
 # ==============================================
+# 関数別生産倍率アップグレードの表示判定
+# ==============================================
+func _should_show_prod_upgrade(upg: Dictionary) -> bool:
+	var group: String = upg.get("group", "")
+	var tier: int = upg.get("tier", 1)
+
+	# 対応関数のアンロック条件
+	match group:
+		"prod_constant":
+			pass  # 常時表示
+		"prod_sum":
+			if not GameManager.is_purchased("add_sum"):
+				return false
+		"prod_product":
+			if not GameManager.is_purchased("add_product"):
+				return false
+		"prod_fact":
+			if not GameManager.is_purchased("add_fact"):
+				return false
+
+	# 前の段階が購入済みか（tier 1は常に表示）
+	if tier > 1:
+		var prev_id := group + "_%d" % (tier - 1)
+		if not GameManager.is_purchased(prev_id):
+			return false
+
+	# 自分自身が購入済みなら非表示（消滅UX）
+	if upg["purchased"] >= 1:
+		return false
+
+	return true
+
+# ==============================================
 # アップグレードボタン再構築
 # ==============================================
 func _rebuild_upgrade_buttons() -> void:
@@ -631,12 +710,16 @@ func _rebuild_upgrade_buttons() -> void:
 	# 1. 通常カードの選別と描画
 	var normal_upgs: Array = []
 	for upg in GameManager.upgrades:
-		# すでに購入済みの1回限りアンロック系アップグレードカードはショップから完全に非表示にする！
+		# すでに購入済みの1回限りアップグレードカードはショップから完全に非表示にする！
 		if upg["max"] == 1 and upg["purchased"] >= 1:
 			continue
 			
 		var is_unlock_card = upg["id"] in ["add_sum", "add_product", "add_fact"]
 		if not is_unlock_card:
+			# 新規：関数別の生産倍率アップグレード表示フィルタ
+			if upg.has("group") and not _should_show_prod_upgrade(upg):
+				continue
+
 			# 通常カードのロック条件判定
 			var is_locked := false
 			var lock_text := ""
