@@ -18,6 +18,12 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameManager="*res://scripts/GameManager.gd"
+EventBus="*res://scripts/EventBus.gd"
+Store="*res://scripts/Store.gd"
+DependencyGraphSystem="*res://scripts/DependencyGraphSystem.gd"
+GameTime="*res://scripts/GameTime.gd"
+DebugOverlay="*res://scripts/DebugOverlay.gd"
+GraphView="*res://scripts/GraphView.gd"
 
 [physics]
 
